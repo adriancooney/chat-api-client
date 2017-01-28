@@ -5,7 +5,7 @@ import Debug from "debug";
 import WebSocket from "ws";
 import Promise from "bluebird";
 import fetch from "isomorphic-fetch";
-import { pull } from "lodash";
+import { pull, omit } from "lodash";
 import pkg from "../package.json";
 
 const debug = Debug("tw-chat:api");
@@ -93,7 +93,9 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object>}    Resolves to the reponse frame.
      */
     socketRequest(type, frame, timeout) {
+        debug(`socket request: ${type}`, JSON.stringify(frame))
         return this.sendFrame(type, frame).then(packet => {
+            debug(`socket response: `, JSON.stringify(packet));
             return this.awaitFrame({ nonce: packet.nonce }, timeout);
         });
     }
@@ -201,8 +203,8 @@ export default class APIClient extends EventEmitter {
      */
     sendMessage(room, message) {
         return this.socketRequest("room.message.created", {
-            roomId: room.id,
-            body: message.content
+            roomId: room,
+            body: message
         });
     }
 
@@ -227,9 +229,17 @@ export default class APIClient extends EventEmitter {
         debug(target, options);
         return Promise.try(fetch.bind(null, target, options)).then(res => {
             debug(res.status, res.statusText);
-            if(raw) return res;
+            if(options.raw) return res;
             else return res.json();
         });
+    }
+
+    static requestList(target, options = {}) {
+        const offset = options.offset || 0;
+        const limit = options.limit || 15;
+        const query = `page%5Boffset%5D=${offset}&page%5Blimit%5D=${limit}`
+
+        return APIClient.request(target + (target.includes("?") ? "&" + query : "?" + query), omit(options, "limit", "offset"))
     }
 
     /**
@@ -239,14 +249,18 @@ export default class APIClient extends EventEmitter {
      * @param  {Object} options             See APIClient.request.
      * @return {Promise<Object|Response>}   See APIClient.request.
      */
-    request(path, options = {}) {
-        return APIClient.request(`${url.format(this.installation)}${path}`, {
+    request(path, options = {}, requester = APIClient.request) {
+        return requester(`${url.format(this.installation)}${path}`, {
             ...options,
             headers: {
                 ...options.headers,
                 Cookie: `tw-auth=${this.auth}`
             }
         });
+    }
+
+    requestList(path, options) {
+        return this.request(path, options, APIClient.requestList);
     }
 
     /**
@@ -258,6 +272,18 @@ export default class APIClient extends EventEmitter {
         return this.request("/chat/me.json?includeAuth=true");
     }
 
+    getPeople(offset, limit) {
+        return this.requestList("/chat/v2/people.json", { offset, limit });
+    }
+
+    getRoom(room) {
+        return this.request(`/chat/v2/rooms/${room}.json?includeUserData=true`);
+    }
+
+    getMessages(room) {
+        return this.request(`/chat/v2/rooms/${room}/messages.json`);
+    }
+
     /**
      * GET /chat/v2/conversations.json - Return list of conversations.
      * 
@@ -265,9 +291,9 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} limit       The number of conversations after the cursor to get.
      * @return {Promise<Array>}     The list of conversations. See Teamwork API Docs.
      */
-    getRooms(offset = 0, limit = 15) {
-        return this.request(`/chat/v2/conversations.json?includeMessageData=true&includeUserData=true` +
-            `&sort=lastActivityAt&page%5Boffset%5D=${offset}&page%5Blimit%5D=${limit}`);
+    getRooms(offset, limit) {
+        return this.requestList(`/chat/v2/conversations.json?includeMessageData=true&includeUserData=true` +
+            `&sort=lastActivityAt`, { offset, limit });
     }
 
     /**
@@ -382,7 +408,7 @@ export default class APIClient extends EventEmitter {
     /**
      * Custom `console.log` output.
      */
-    [inspect.custom]() {
+    inspect() {
         return `APIClient[authorized, auth=${this.auth}]`;
     }
 }
