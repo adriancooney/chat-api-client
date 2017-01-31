@@ -1,0 +1,9 @@
+#!/usr/bin/env babel-node
+import program from "commander";
+import pkg from "../package.json";
+
+program
+    .version(pkg.version)
+    .command("message", "send a message to a user")
+    .command("listen", "listen for chat events")
+    .parse(process.argv);

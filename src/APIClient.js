@@ -3,9 +3,10 @@ import { inspect } from "util";
 import { EventEmitter } from "events";
 import Debug from "debug";
 import WebSocket from "ws";
-import Promise from "bluebird";
+import Promise, { CancellationError } from "bluebird";
 import fetch from "isomorphic-fetch";
-import { pull, omit } from "lodash";
+import { without, omit, isEqual } from "lodash";
+import config from "../config.json";
 import pkg from "../package.json";
 
 const debug = Debug("tw-chat:api");
@@ -50,6 +51,10 @@ export default class APIClient extends EventEmitter {
     sendFrame(type, frame) {
         debug("sending frame", type, frame);
         return Promise.try(() => {
+            if(!this.connected) {
+                throw new Error("Socket is not connected to the server. Please reconnect.");
+            }
+
             frame = APIClient.createFrame(type, frame);
             this.socket.send(JSON.stringify(frame));
             return frame;
@@ -64,12 +69,14 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object>}    Resolves to the raw object packet returned from the server.
      */
     awaitFrame(filter, timeout = 30000) {
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => {
             this.awaiting.push(filter = {
-                filter, resolve
+                filter, resolve, reject
             });
+        }).catch(CancellationError, () => {
+            return; // Ignore the cancellation error.
         }).timeout(timeout, `Awaiting frame ${JSON.stringify(filter)} has timed out.`).finally(() => {
-            this.awaiting = pull(this.awaiting, filter);
+            this.awaiting = without(this.awaiting, filter);
         });
     }
 
@@ -80,7 +87,18 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object>}    Resolves to the raw object packet returned from the server.
      */
     raceFrames(...filters) {
-        return Promise.any(filters.map(filter => this.awaitFrame(filter)));
+        const race = filters.map(filter => this.awaitFrame(filter));
+
+        return Promise.any(race).finally(() => {
+            // Kill any waiting promises.
+            race.forEach((prom, i) => {
+                if(prom.isPending()) {
+                    const filter = this.awaiting.find(({ filter }) => filter === filters[i]);
+                    this.awaiting = without(this.awaiting, filter);
+                    filter.reject(new CancellationError());
+                }
+            });
+        });
     }
 
     /**
@@ -145,11 +163,19 @@ export default class APIClient extends EventEmitter {
      */
     connect() {
         return new Promise((resolve, reject) => {
+            const { hostname } = url.parse(this.installation);
+            const env = hostname.match(/teamwork.com/) ? "production" : "development"
+            let server = config[env].server;
+
+            if(env === "development") {
+                server = {
+                    ...server, hostname
+                };
+            }
+
             const socketServer = url.format({
-                ...this.installation,
-                protocol: "ws:",
-                slashes: true,
-                port: "8181"
+                ...server,
+                slashes: true
             });
 
             debug(`connecting socket server to ${socketServer}`);
@@ -161,6 +187,7 @@ export default class APIClient extends EventEmitter {
 
             this.socket.on("message", this.onSocketMessage.bind(this));
             this.socket.on("error", this.onSocketError.bind(this));
+            this.socket.on("close", this.onSocketClose.bind(this));
 
             this.socket.on("open", () => {
                 // Wait for the authentication request frame and send back the auth frame.
@@ -179,7 +206,7 @@ export default class APIClient extends EventEmitter {
                         throw new Error(frame.contents);
                     }
 
-                    resolve();
+                    resolve(this.socket);
                 }).catch(reject);
             });
         });
@@ -190,7 +217,7 @@ export default class APIClient extends EventEmitter {
      * 
      * @return {Boolean} connected or not.
      */
-    isConnected() {
+    get connected() {
         return this.socket && this.socket.readyState === WebSocket.OPEN;
     }
 
@@ -205,7 +232,7 @@ export default class APIClient extends EventEmitter {
         return this.socketRequest("room.message.created", {
             roomId: room,
             body: message
-        });
+        }).then(({ contents }) => contents);
     }
 
     /**
@@ -230,7 +257,13 @@ export default class APIClient extends EventEmitter {
         return Promise.try(fetch.bind(null, target, options)).then(res => {
             debug(res.status, res.statusText);
             if(options.raw) return res;
-            else return res.json();
+            else {
+                if(!res.ok) {
+                    throw new HTTPError(res.status, res.statusText, res);
+                }
+
+                return res.json();
+            }
         });
     }
 
@@ -250,7 +283,7 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object|Response>}   See APIClient.request.
      */
     request(path, options = {}, requester = APIClient.request) {
-        return requester(`${url.format(this.installation)}${path}`, {
+        return requester(`${this.installation}${path}`, {
             ...options,
             headers: {
                 ...options.headers,
@@ -274,6 +307,20 @@ export default class APIClient extends EventEmitter {
 
     getPeople(offset, limit) {
         return this.requestList("/chat/v2/people.json", { offset, limit });
+    }
+
+    createRoom(handles, message) {
+        return this.request("/chat/v2/rooms.json", {
+            method: "POST",
+            body: {
+                room: {
+                    handles,
+                    message: {
+                        body: message
+                    }
+                }
+            }
+        });
     }
 
     getRoom(room) {
@@ -323,8 +370,18 @@ export default class APIClient extends EventEmitter {
      *                               as the user. The user's details can be access at `APIClient.user`.
      */
     static loginWithCredentials(installation, username, password) {
+        if(typeof installation === "object") {
+            installation = url.format({
+                protocol: "http:",
+                ...installation
+            });
+        }
+
+        // Remove any trailing slash
+        installation = installation.replace(/\/$/, "");
+
         debug(`attempting to login with ${username} at ${installation}.`);
-        return APIClient.request(`${url.format(installation)}/launchpad/v1/login.json`, {
+        return APIClient.request(`${installation}/launchpad/v1/login.json`, {
             raw: true,
             method: "POST",
             body: {
@@ -384,8 +441,9 @@ export default class APIClient extends EventEmitter {
      *     Chat socket frames. The filter objects can contain various properties
      *     that dictate how we match that frame. The follow properties are supported:
      *
-     *          "type"  {String}    Match the exact frame type.
-     *          "nonce" {Number}    Match the exact nonce of the frame.
+     *          "type"      {String}    Match the exact frame type.
+     *          "nonce"     {Number}    Match the exact nonce of the frame.
+     *          "contents"  {Object}    Deep equal contents object.
      *
      *     Fitlers can also be specified in shorthand:
      *      - If the filter is a string, it is converted to a `{ type: <filter> }` object.
@@ -398,11 +456,21 @@ export default class APIClient extends EventEmitter {
         if(typeof filter === "string")
             filter = { type: filter };
 
+        let matches = [];
+
         if(filter.type && typeof filter.type === "string") {
-            return filter.type === frame.name;
-        } else if(filter.nonce) {
-            return filter.nonce === frame.nonce;
-        } else return false;
+            matches.push(filter.type === frame.name);
+        } 
+
+        if(filter.nonce) {
+            matches.push(filter.nonce === frame.nonce);
+        }
+
+        if(filter.contents) {
+            matches.push(isEqual(filter.contents, frame.contents));
+        }
+
+        return matches.every(match => match);
     }
 
     /**
@@ -410,5 +478,21 @@ export default class APIClient extends EventEmitter {
      */
     inspect() {
         return `APIClient[authorized, auth=${this.auth}]`;
+    }
+
+    toJSON() {
+        return {
+            auth: this.auth,
+            installation: this.installation
+        };
+    }
+}
+
+export class HTTPError extends Error {
+    constructor(statusCode, statusMessage, response) {
+        super(`HTTPError: ${statusCode} ${statusMessage}`);
+        this.statusCode = this.code = statusCode;
+        this.statusMessage = statusMessage;
+        this.response = response;
     }
 }

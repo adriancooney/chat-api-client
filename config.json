@@ -1,0 +1,15 @@
+{
+    "production": {
+        "server": {
+            "hostname": "chat-socks.teamwork.com",
+            "protocol": "wss:"
+        }
+    },
+
+    "development": {
+        "server": {
+            "port": 8181,
+            "protocol": "ws:"
+        }
+    }
+}

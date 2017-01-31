@@ -1,14 +1,32 @@
+import assert from "assert";
 import APIClient from "../src/APIClient";
-
-const INSTALLATION = "digitalcrew.teamwork.com";
-const USERNAME = "adrian.cooney@teamwork.com";
-const PASSWORD = "2+@b7oDjnR6r=Ghbh6Z";
+import { INSTALLATION, USERNAME, PASSWORD, localAPIClient } from "./";
 
 describe("APIClient", () => {
-    describe(".loginWithCredentials", function() {
-        this.timeout(10000);
-        it("should login correctly", () => {
-            return APIClient.loginWithCredentials(INSTALLATION, USERNAME, PASSWORD);
+    describe("static methods", () => {
+        describe(".loginWithCredentials", () => {
+            it("should login correctly", async () => {
+                await APIClient.loginWithCredentials(INSTALLATION, USERNAME, PASSWORD);
+            });
+        });
+    });
+
+    describe("instance methods", () => {
+        let api;
+        beforeEach(async () => {
+            api = await localAPIClient();
+        });
+
+        describe("#sendFrame", () => {
+            it("should not send frame on disconnect", async () => {
+                api.socket.close();
+                
+                try {
+                    await api.sendFrame("test-frame", {});
+                } catch(err) {
+                    assert.equal("Socket is not connected to the server. Please reconnect.", err.message);
+                }
+            });
         });
     });
 });
