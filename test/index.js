@@ -1,4 +1,7 @@
-import debug from "debug";
+import { EventEmitter } from "events";
+import Promise from "bluebird";
+import createDebug from "debug";
+import LocalWebSocket from "./lib/LocalWebSocket";
 import TeamworkChat from "../src/TeamworkChat";
 import APIClient from "../src/APIClient";
 
@@ -10,8 +13,34 @@ export const INSTALLATION = {
 
 export const USERNAME = "donalin+dev1@gmail.com";
 export const PASSWORD = "test";
-export const localTeamworkChat = TeamworkChat.fromCredentials.bind(null, INSTALLATION, USERNAME, PASSWORD);
-export const localAPIClient = APIClient.loginWithCredentials.bind(null, INSTALLATION, USERNAME, PASSWORD);
+
+export const devAPIClient = APIClient.loginWithCredentials.bind(null, INSTALLATION, USERNAME, PASSWORD);
+export const devTeamworkChat = TeamworkChat.fromCredentials.bind(null, INSTALLATION, USERNAME, PASSWORD);
+
+export const localAPIClient = () => {
+    const _webSocket = APIClient.WebSocket;
+    APIClient.WebSocket = LocalWebSocket;
+
+    const api = new APIClient("http://local", "local-auth");
+
+    api.user = {
+        ...createUser(),
+        user: createUser()
+    };
+
+    return api.connect().then(() => {
+        APIClient.WebSocket = _webSocket;
+        return api;
+    });
+};
+
+export const localTeamworkChat = () => {
+    return localAPIClient().then(api => {
+        return new TeamworkChat(api, api.user);
+    });
+};
+
+const debug = createDebug("tw-chat:test");
 
 export function createFrame(name, contents) {
     return {

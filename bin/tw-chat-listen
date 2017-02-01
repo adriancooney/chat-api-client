@@ -8,17 +8,23 @@ program
     .option("--json", "Output the events in JSON.")
     .parse(process.argv);
 
-TeamworkChat.fromCredentials("http://digitalcrew.teamwork.com", "adrian.cooney@teamwork.com", "2+@b7oDjnR6r=Ghbh6Z").then(chat => {
+const dev = [INSTALLATION, USERNAME, PASSWORD];
+
+TeamworkChat.fromCredentials(...dev).then(chat => {
     return [chat, chat.getRooms()];
 }).spread(chat => {
     chat.on("*", (...details) => {
         if(program.json) {
             console.log(JSON.stringify({
+                date: new Date(),
                 event: details[0],
                 data: details.slice(1) 
-            }, null, 2));
+            }));
         } else {
             console.log(">>> " + details.map(detail => inspect(detail)).join("\t"));
         }
     });
+}).catch(err => {
+    console.error(err);
+    process.exit(1);
 });

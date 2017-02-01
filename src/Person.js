@@ -33,12 +33,13 @@ export default class Person extends EventEmitter {
 
         this.update(details);
 
-        // Node considers this a potential "memory leak" however it is untrue (although it may be a sign of leaks to come).
+        // Node warns us that this is a potential "memory leak" however it is untrue (although it may be a sign of leaks to come).
         // Rooms (i.e. all the rooms) listen for the "update" event on people so they can appropriately act on the information
-        // and update the room however people can be in many rooms. This presents a problem because hundreds of rooms
+        // and update the room however a person can be in many rooms. This presents a problem because hundreds of rooms
         // means hundreds of event listeners on a single person object. What do we do? Disable person update
         // notifications for rooms? Disable person update notifications for the logged in user on the rooms
-        // and force the external to listen to TeamworkChat.on("user:update")? Anyway, for now, we're increasing
+        // and force the external to listen to TeamworkChat.on("user:update")? Lazy bind event handlers to the
+        // person objects until someone listens for a `person:update` event? Anyway, for now, we're increasing
         // the maxEventListener size to something huge for these Person emitters only but we will have to revisit this.
         this.setMaxListeners(1000);
 
@@ -72,16 +73,17 @@ export default class Person extends EventEmitter {
     }
 
     update(details) {
-        const update = {};
+        let update = {};
 
         if(details.id) update.id = parseInt(details.id);
         if(details.lastActivityAt) update.lastActivity = moment(details.lastActivityAt);
 
-        let person = Object.assign(this, omit(details, [
+        update = Object.assign(omit(details, [
             "lastActivityAt"
         ]), update);
 
-        this.emit("update", person);
+        let person = Object.assign(this, update);
+        this.emit("update", person, update);
 
         return person;
     }

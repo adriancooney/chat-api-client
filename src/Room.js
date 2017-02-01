@@ -42,8 +42,6 @@ export default class Room extends EventEmitter {
     }
 
     addPerson(person) {
-        console.log("Adding person", this, person);
-
         person.on("update", this.emit.bind(this, "person:update"));
         this.emit("person:new", person);
         return this.people[person.id] = person;

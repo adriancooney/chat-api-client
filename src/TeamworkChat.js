@@ -9,6 +9,12 @@ import Message from "./Message";
 
 const debug = Debug("tw-chat");
 
+/**
+ * The time in ms to wait between reconnection attempts.
+ * @type {Number}
+ */
+const RECONNECT_INTERVAL = 1000 * 3;
+
 export default class TeamworkChat extends Person {
     /**
      * The rooms store. We use an array instead of and object keyed with room IDs because
@@ -27,6 +33,7 @@ export default class TeamworkChat extends Person {
         this.update(user.user);
         this.room.addPerson(this);
 
+        this.api.on("connected", this.emit.bind(this, "connected"));
         this.api.on("frame", this.onFrame.bind(this));
         this.api.on("close", this.onDisconnect.bind(this));
 
@@ -34,24 +41,41 @@ export default class TeamworkChat extends Person {
         this.room.on("person:new", this.emit.bind(this, "person:new"));
         this.room.on("person:update", this.emit.bind(this, "person:update"));
 
-        // Adding "error" listener to stop the EventEmitter from throwing the error
-        // if no listeners are attached.
+        // Adding "error" listener to stop the EventEmitter from throwing the error if no listeners are attached.
         this.on("error", debug.bind(null, "TeamworkChat Error:"));
     }
 
-    onDisconnect() {
-        if(this.closed) {
+
+    /**
+     * Event Handler: when the APIClient's socket `close`'s.
+     */
+    onDisconnect(attempt = 0) {
+        if(this.forceClosed) {
+            // If the socket was force close (i.e. TeamworkChat.close), we
+            // don't want to attempt to reconnect so we exit.
             return;
         }
 
-        debug("socket disconnected");
-        this.emit("disconnect");
-        this.api.connect().then(() => {
+        if(attempt === 0) {
+            debug("socket disconnected");
+            this.emit("disconnect");
+        } else {
+            debug(`socket reconnect failed, attempting to reconnect (attempt ${attempt})`);
+        }
+
+        return this.api.connect().then(() => {
             debug("socket reconnected");
             this.emit("reconnect");
+        }).catch(error => {
+            debug("unable to reconnect socket", error);
+            return Promise.delay(RECONNECT_INTERVAL).then(this.onDisconnect.bind(this, attempt + 1));
         });
     }
 
+    /**
+     * Event Handler: when the APIClient's socket recieves a `frame`
+     * @param  {Object} frame Parsed socket frame.
+     */
     onFrame(frame) {
         Promise.try(() => {
             switch(frame.name) {
@@ -69,6 +93,10 @@ export default class TeamworkChat extends Person {
                     return this.getRoom(message.roomId).then(room => {
                         return room.handleMessage(message)
                     });
+                break;
+
+                case "pong":
+                    this.emit("pong");
                 break;
 
                 case "user.modified":
@@ -93,6 +121,12 @@ export default class TeamworkChat extends Person {
         });
     }
 
+    /**
+     * Override ability to send message to a Person object as this is an error,
+     * the consumer would be attempting to send a message to themselves.
+     * 
+     * @throws {Error} (Always)
+     */
     sendMessage() {
         throw new Error("Illegal operation: cannot send to self.");
     }
@@ -271,8 +305,8 @@ export default class TeamworkChat extends Person {
     }
 
     close() {
-        this.closed = true;
-        this.api.socket.close();
+        this.forceClosed = true;
+        this.api.close();
     }
 
     emit(eventName, ...args) {

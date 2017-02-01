@@ -1,7 +1,7 @@
 import assert from "assert";
 import Promise from "bluebird";
 import sinon from "sinon";
-import { createFrame, createMessageFrame, createRoom, localTeamworkChat } from "./";
+import { createFrame, createMessageFrame, createRoom, devTeamworkChat, localTeamworkChat } from "./";
 import TeamworkChat, {
     APIClient, Person, Room, Message
 } from "..";
@@ -24,7 +24,7 @@ describe("TeamworkChat", function() {
     describe("instance methods", () => {
         let chat;
         beforeEach(async () => {
-            chat = await localTeamworkChat();
+            chat = await devTeamworkChat();
         });
 
         describe("#getPersonByHandle", () => {
@@ -59,7 +59,9 @@ describe("TeamworkChat", function() {
         });
     });
 
-    describe("events", () => {
+    describe("events", function() {
+        this.timeout(0);
+
         let chat;
         beforeEach(async () => {
             chat = await localTeamworkChat();
@@ -95,22 +97,26 @@ describe("TeamworkChat", function() {
                 });
             });
 
-            it("should send a message to a locally, non-existing room", done => {
+            it.only("should send a message to a locally, non-existing room", done => {
                 const stub = sinon.stub(APIClient, "request", (url, options) => {
-                    return Promise.resolve({ room: createRoom() });
+                    const roomId = url.match(/rooms\/(\d+)\.json/)[1];
+                    return Promise.resolve({ 
+                        room: createRoom({
+                            id: parseInt(roomId)
+                        }) 
+                    });
                 });
 
                 chat.on("error", done);
-                chat.api.emit("frame", createMessageFrame());
-
-                chat.on("room:new", room => {
-                    stub.restore();
-                    done();
-                });
+                setInterval(() => {
+                    chat.api.emit("frame", createMessageFrame({
+                        id: Math.floor(Math.random())
+                    }));
+                }, 3000);
             });
         });
 
-        describe.only("chat event: user.modified", () => {
+        describe("chat event: user.modified", () => {
             it("it should update the user appropriately", done => {
                 chat.on("error", done);
 

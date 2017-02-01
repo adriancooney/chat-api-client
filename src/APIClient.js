@@ -3,7 +3,7 @@ import { inspect } from "util";
 import { EventEmitter } from "events";
 import Debug from "debug";
 import WebSocket from "ws";
-import Promise, { CancellationError } from "bluebird";
+import Promise, { CancellationError, TimeoutError } from "bluebird";
 import fetch from "isomorphic-fetch";
 import { without, omit, isEqual } from "lodash";
 import config from "../config.json";
@@ -12,14 +12,49 @@ import pkg from "../package.json";
 const debug = Debug("tw-chat:api");
 
 /**
+ * The time in ms between pings.
+ * 
+ * @type {Number}
+ */
+const PING_INTERVAL = 5000;
+
+/**
+ * The maximum amount of pings allowed fail before the socket is like "hang on,
+ * something isn't right" and it assumes the connection is broken then
+ * forcefully disconnects the socket from the server (it does not wait until
+ * the `readyState` is `WebSocket.CLOSED` that is, it's really slow).
+ * 
+ * @type {Number}
+ */
+const PING_MAX_ATTEMPT = 3;
+
+/**
+ * The timeout in ms for the ping `socketRequest`. This, in conjunction with
+ * PING_INTERVAL and PING_MAX_ATTEMPT, allows you to configure the reaction
+ * time for broken connection to the server. To calculate the maximum amount
+ * of time before the APIClient will realize the connection is broken, use
+ * this formula:
+ *
+ *      PING_INTERVAL + (PING_MAX_ATTEMPT * PING_TIMEOUT)
+ *
+ *      5000 + (3 * 3000) = 14000ms or 14 seconds until `close` event fires.
+ *
+ * @type {Number}
+ */
+const PING_TIMEOUT = 3000;
+
+/**
  * The global nonce counter. Scoped to this APIClient module only so
- * nothing outside can change it.
+ * nobody outside can fiddle with it.
  * 
  * @type {Number}
  */
 let NONCE = 0;
 
 export default class APIClient extends EventEmitter {
+    /** @type {Function} The implementation of the WebSocket class */
+    static WebSocket = WebSocket;
+
     /**
      * The filters waiting to be matches to frames.
      * 
@@ -41,24 +76,27 @@ export default class APIClient extends EventEmitter {
         this.auth = auth;
     }
 
-    /**
-     * Send a frame down the socket to the server.
-     * 
-     * @param  {String} name        The type of the frame. See APICLient.createFrame.
-     * @param  {Any}    frame       The contents of the frame.
-     * @return {Promise<Object>}    Resolves the raw packet object sent down the line.
-     */
-    sendFrame(type, frame) {
-        debug("sending frame", type, frame);
+    sendRawFrame(frame) {
+        debug("sending frame", frame);
         return Promise.try(() => {
             if(!this.connected) {
                 throw new Error("Socket is not connected to the server. Please reconnect.");
             }
 
-            frame = APIClient.createFrame(type, frame);
             this.socket.send(JSON.stringify(frame));
             return frame;
         });
+    }
+
+    /**
+     * Send a frame down the socket to the server.
+     * 
+     * @param  {String} name        The type of the frame. See APICLient.createFrame.
+     * @param  {Any}    contents    The contents of the frame.
+     * @return {Promise<Object>}    Resolves the raw packet object sent down the line.
+     */
+    sendFrame(type, contents = {}) {
+        return this.sendRawFrame(APIClient.createFrame(type, contents));
     }
 
     /**
@@ -111,11 +149,12 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object>}    Resolves to the reponse frame.
      */
     socketRequest(type, frame, timeout) {
-        debug(`socket request: ${type}`, JSON.stringify(frame))
+        debug(`socket request: ${type} (timeout = ${timeout})`, JSON.stringify(frame))
         return this.sendFrame(type, frame).then(packet => {
-            debug(`socket response: `, JSON.stringify(packet));
             return this.awaitFrame({ nonce: packet.nonce }, timeout);
-        });
+        }).then(packet => {
+            debug(`socket response: `, JSON.stringify(packet));
+        })
     }
 
     /**
@@ -134,7 +173,7 @@ export default class APIClient extends EventEmitter {
      * @param  {String} message Raw frame string returned from server.
      */
     onSocketMessage(message) {
-        debug("frame", message);
+        debug("incoming frame", message);
         const frame = JSON.parse(message);
 
         if(this.awaiting.length) {
@@ -154,6 +193,7 @@ export default class APIClient extends EventEmitter {
      */
     onSocketClose() {
         debug("socket closed");
+        this.stopPing();
         this.emit("close");
     }
 
@@ -179,15 +219,17 @@ export default class APIClient extends EventEmitter {
             });
 
             debug(`connecting socket server to ${socketServer}`);
-            this.socket = new WebSocket(socketServer, {
+            this.socket = new APIClient.WebSocket(socketServer, {
                 headers: {
                     Cookie: `tw-auth=${this.auth}`
                 }
             });
 
             this.socket.on("message", this.onSocketMessage.bind(this));
-            this.socket.on("error", this.onSocketError.bind(this));
-            this.socket.on("close", this.onSocketClose.bind(this));
+
+            // Attach the reject handler for the error handler, see below for when we remove it
+            // and add the `onSocketError` handler instead when the authentication flow completes.
+            this.socket.on("error", reject);
 
             this.socket.on("open", () => {
                 // Wait for the authentication request frame and send back the auth frame.
@@ -206,10 +248,71 @@ export default class APIClient extends EventEmitter {
                         throw new Error(frame.contents);
                     }
 
+                    // Start the pinging to ensure our socket doesn't get disconnected for inactivity.
+                    // this._pingInterval = setInterval(() => {
+                    //     this.ping().catch(this.emit.bind(this, "error"));
+                    // }, PING_INTERVAL);
+                    this.nextPing();
+
+                    this.emit("connected");
+
+                    // Remove the "error" handler and replace it with the `onSocketError`
+                    this.socket.removeListener("error", reject);
+                    this.socket.on("error", this.onSocketError.bind(this));
+
+                    this.socket.on("close", this.onSocketClose.bind(this));
+
                     resolve(this.socket);
                 }).catch(reject);
             });
         });
+    }
+
+    nextPing(attempt = 0) {
+        return new Promise((resolve, reject) => {
+            debug("attempting ping");
+
+            // We save this so `stopPing` can forcefully stop the pinging.
+            this._nextPingReject = reject;
+
+            // God, this hurts my promises but it's the only nice way to do standardized cancellation.
+            // Send the ping down the socket and 
+            this.ping().then(resolve).catch(TimeoutError, err => {
+                if(attempt < PING_MAX_ATTEMPT) {
+                    debug(`ping timed out, attempting again (attempt = ${attempt})`);
+                    this.nextPing(attempt + 1);
+                } else {
+                    debug(`third ping attempt failed, assuming socket connection is broken. Closing.`);
+                    reject(err);
+                }
+            }).catch(err => this.emit.bind(this, "error"));
+        }).delay(PING_INTERVAL).then(() => {
+            debug("ping succeeded");
+            this.nextPing();
+        }).catch(CancellationError, () => {
+            debug("ping stopped");
+        }).catch(TimeoutError, () => {
+            debug("pinging stopped, connection broken");
+            this.close();
+        });
+    }
+
+    stopPing() {
+        if(this._nextPingReject) {
+            this._nextPingReject(new CancellationError());
+        }
+    }
+
+    close() {
+        debug("forcefully closing socket");
+        this.socket.close();
+
+        // Closing a socket takes a while so to speed up the process, we
+        // manually call `onSocketClose` and remove the original `close` event 
+        // handler from the socket that would also call it from the socket.
+        // It still closes gracefully but we don't care when it does.
+        this.socket.removeAllListeners("close");
+        this.onSocketClose();
     }
 
     /**
@@ -253,7 +356,7 @@ export default class APIClient extends EventEmitter {
             };
         }
 
-        debug(target, options);
+        debug("request", target, options);
         return Promise.try(fetch.bind(null, target, options)).then(res => {
             debug(res.status, res.statusText);
             if(options.raw) return res;
@@ -283,6 +386,7 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object|Response>}   See APIClient.request.
      */
     request(path, options = {}, requester = APIClient.request) {
+        debug("authenticated request", path, options);
         return requester(`${this.installation}${path}`, {
             ...options,
             headers: {
@@ -294,6 +398,10 @@ export default class APIClient extends EventEmitter {
 
     requestList(path, options) {
         return this.request(path, options, APIClient.requestList);
+    }
+
+    ping(timeout = 3000) {
+        return this.socketRequest("ping", {}, timeout);
     }
 
     /**
@@ -389,7 +497,7 @@ export default class APIClient extends EventEmitter {
                 rememberMe: true
             }
         }).then(res => {
-            if(res.status === 200) {
+            if(res.ok) {
                 // Extract the tw-auth cookie from the responses
                 const cookies = res.headers.get("Set-Cookie");
                 const [ twAuthCookie ] = cookies.split(";");
@@ -399,7 +507,7 @@ export default class APIClient extends EventEmitter {
                 return new APIClient(installation, twAuth);
             } else {
                 debug(`login failed: ${res.status}`);
-                throw new Error(`Invalid login credentials for ${username}@${this.format(installation)}.`);
+                throw new Error(`Invalid login credentials for ${username}@${installation}.`);
             }
         }).then(api => {
             return [api, api.getProfile()];
@@ -419,7 +527,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Boolean}    nonced   Whether or not to nonce the frame.
      * @return {Object}              The raw object packet to be stringified and sent to the server.
      */
-    static createFrame(type, contents, nonced = true) {
+    static createFrame(type, contents = {}, nonced = true) {
         return {
             contentType: "object",
             source: {
