@@ -1,30 +1,30 @@
 #!/usr/bin/env babel-node
 import { inspect } from "util";
-import program from "commander";
 import TeamworkChat from "..";
-import { INSTALLATION, USERNAME, PASSWORD } from "../test";
+import { command, getUser } from "./lib/cli";
 
-program
-    .option("--json", "Output the events in JSON.")
-    .parse(process.argv);
+command(program => {
+    program
+        .option("--include-pings", "include pings")
+        .option("--json", "output in json")
+        .parse(process.argv);
 
-const dev = [INSTALLATION, USERNAME, PASSWORD];
+    return TeamworkChat.fromCredentials(...getUser()).then(chat => {
+        return chat.getRooms().then(rooms => {
+            chat.on("*", (event, ...details) => {
+                if(event === "pong" && !program.includePings)
+                    return;
 
-TeamworkChat.fromCredentials(...dev).then(chat => {
-    return [chat, chat.getRooms()];
-}).spread(chat => {
-    chat.on("*", (...details) => {
-        if(program.json) {
-            console.log(JSON.stringify({
-                date: new Date(),
-                event: details[0],
-                data: details.slice(1) 
-            }));
-        } else {
-            console.log(">>> " + details.map(detail => inspect(detail)).join("\t"));
-        }
+                if(program.json) {
+                    console.log(JSON.stringify({
+                        event,
+                        date: new Date(),
+                        data: details.slice(1) 
+                    }));
+                } else {
+                    console.log(`${new Date()} >>> "${event}": ${details.map(detail => inspect(detail)).join("\t")}`);
+                }
+            });
+        });
     });
-}).catch(err => {
-    console.error(err);
-    process.exit(1);
 });

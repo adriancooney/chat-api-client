@@ -3,8 +3,9 @@ import { inspect } from "util";
 import { EventEmitter } from "events";
 import Debug from "debug";
 import WebSocket from "ws";
-import Promise, { CancellationError, TimeoutError } from "bluebird";
 import fetch from "isomorphic-fetch";
+import Promise, { CancellationError, TimeoutError } from "bluebird";
+import { green, blue } from "colors";
 import { without, omit, isEqual } from "lodash";
 import config from "../config.json";
 import pkg from "../package.json";
@@ -44,6 +45,13 @@ const PING_MAX_ATTEMPT = 3;
 const PING_TIMEOUT = 3000;
 
 /**
+ * The legal values for updating user status with `updateStatus`.
+ * 
+ * @type {Array}
+ */
+export const STATUS_TYPES = ["idle", "active"];
+
+/**
  * The global nonce counter. Scoped to this APIClient module only so
  * nobody outside can fiddle with it.
  * 
@@ -76,14 +84,22 @@ export default class APIClient extends EventEmitter {
         this.auth = auth;
     }
 
-    sendRawFrame(frame) {
-        debug("sending frame", frame);
+    /**
+     * Send a raw object down the socket.
+     * 
+     * @param  {Object|String}          frame The object (will be serialized) or string.
+     * @return {Promise<Object|String>}       The frame object (or string) sent.
+     */
+    send(frame) {
+        debug("sending message", frame);
         return Promise.try(() => {
             if(!this.connected) {
                 throw new Error("Socket is not connected to the server. Please reconnect.");
             }
 
-            this.socket.send(JSON.stringify(frame));
+            frame = typeof frame === "object" ? JSON.stringify(frame) : frame;
+            this.socket.send(frame);
+
             return frame;
         });
     }
@@ -96,7 +112,7 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object>}    Resolves the raw packet object sent down the line.
      */
     sendFrame(type, contents = {}) {
-        return this.sendRawFrame(APIClient.createFrame(type, contents));
+        return this.send(APIClient.createFrame(type, contents));
     }
 
     /**
@@ -152,9 +168,9 @@ export default class APIClient extends EventEmitter {
         debug(`socket request: ${type} (timeout = ${timeout})`, JSON.stringify(frame))
         return this.sendFrame(type, frame).then(packet => {
             return this.awaitFrame({ nonce: packet.nonce }, timeout);
-        }).then(packet => {
-            debug(`socket response: `, JSON.stringify(packet));
-        })
+        }).tap(packet => {
+            debug("socket response:", JSON.stringify(packet));
+        });
     }
 
     /**
@@ -248,18 +264,15 @@ export default class APIClient extends EventEmitter {
                         throw new Error(frame.contents);
                     }
 
-                    // Start the pinging to ensure our socket doesn't get disconnected for inactivity.
-                    // this._pingInterval = setInterval(() => {
-                    //     this.ping().catch(this.emit.bind(this, "error"));
-                    // }, PING_INTERVAL);
+                    // Start the pinging to ensure our socket doesn't get disconnected for inactivity,
+                    // and to monitor our connection.
                     this.nextPing();
 
                     this.emit("connected");
 
-                    // Remove the "error" handler and replace it with the `onSocketError`
+                    // Remove the "error" handler and replace it with the `onSocketError`.
                     this.socket.removeListener("error", reject);
                     this.socket.on("error", this.onSocketError.bind(this));
-
                     this.socket.on("close", this.onSocketClose.bind(this));
 
                     resolve(this.socket);
@@ -276,8 +289,10 @@ export default class APIClient extends EventEmitter {
             this._nextPingReject = reject;
 
             // God, this hurts my promises but it's the only nice way to do standardized cancellation.
-            // Send the ping down the socket and 
-            this.ping().then(resolve).catch(TimeoutError, err => {
+            // Send the ping down the socket and wait PING_INTERVAL before attempting the next ping.
+            // We `delay` here instead of before the next, outside `then` so we can reject without
+            // having a pending ping left.
+            this.ping().delay(PING_INTERVAL).then(resolve).catch(TimeoutError, err => {
                 if(attempt < PING_MAX_ATTEMPT) {
                     debug(`ping timed out, attempting again (attempt = ${attempt})`);
                     this.nextPing(attempt + 1);
@@ -286,7 +301,7 @@ export default class APIClient extends EventEmitter {
                     reject(err);
                 }
             }).catch(err => this.emit.bind(this, "error"));
-        }).delay(PING_INTERVAL).then(() => {
+        }).then(() => {
             debug("ping succeeded");
             this.nextPing();
         }).catch(CancellationError, () => {
@@ -299,19 +314,21 @@ export default class APIClient extends EventEmitter {
 
     stopPing() {
         if(this._nextPingReject) {
+            debug("stopping ping");
             this._nextPingReject(new CancellationError());
         }
     }
 
     close() {
-        debug("forcefully closing socket");
-        this.socket.close();
-
         // Closing a socket takes a while so to speed up the process, we
         // manually call `onSocketClose` and remove the original `close` event 
         // handler from the socket that would also call it from the socket.
         // It still closes gracefully but we don't care when it does.
         this.socket.removeAllListeners("close");
+
+        debug("forcefully closing socket");
+        this.socket.close();
+
         this.onSocketClose();
     }
 
@@ -339,6 +356,38 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
+     * Update the currently logged in user's status.
+     * 
+     * @param {String} status One of: "idle"|"active"
+     */
+    updateStatus(status) {
+        if(!STATUS_TYPES.includes(status))
+            throw new Error(`Status must be one of {${STATUS_TYPES.join(", ")}}. Invalid status: ${status}.`);
+
+        return this.sendFrame("user.modified.status", { status })
+    }
+
+    getUnseenCount() {
+        return this.sendFrame("unseen.counts.request").then(() => {
+            return this.awaitFrame("unseen.counts.updated");
+        });
+    }
+
+    activateRoom(room) {
+        return this.sendFrame("room.user.active", {
+            roomId: room,
+            date: new Date()
+        });
+    }
+
+    typing(status, room) {
+        return this.sendFrame("room.typing", {
+            isTyping: status,
+            roomId: room
+        });
+    }
+
+    /**
      * Make an *unauthenticated* request to the Teamwork API.
      * 
      * @param  {String} target              The fully qualified URL to fetch.
@@ -356,7 +405,7 @@ export default class APIClient extends EventEmitter {
             };
         }
 
-        debug("request", target, options);
+        debug(">>", green(options.method || "GET"), blue(target), options);
         return Promise.try(fetch.bind(null, target, options)).then(res => {
             debug(res.status, res.statusText);
             if(options.raw) return res;
@@ -367,15 +416,27 @@ export default class APIClient extends EventEmitter {
 
                 return res.json();
             }
+        }).tap(data => {
+            if(!options.raw)
+                debug("<<", blue(target), data);
         });
     }
 
-    static requestList(target, options = {}) {
-        const offset = options.offset || 0;
-        const limit = options.limit || 15;
-        const query = `page%5Boffset%5D=${offset}&page%5Blimit%5D=${limit}`
+    static requestList(target, { offset, limit, ...options } = {}) {
+        let query = [];
 
-        return APIClient.request(target + (target.includes("?") ? "&" + query : "?" + query), omit(options, "limit", "offset"))
+        if(typeof offset !== "undefined") 
+            query.push(`page%5Boffset%5D=${offset}`);
+
+        if(typeof limit !== "undefined") 
+            query.push(`&page%5Blimit%5D=${limit}`);
+
+        if(query.length) {
+            query = query.join("&");
+            target += target.includes("?") ? ("&" + query) : ("?" + query);
+        }
+
+        return APIClient.request(target, options)
     }
 
     /**
@@ -386,7 +447,6 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object|Response>}   See APIClient.request.
      */
     request(path, options = {}, requester = APIClient.request) {
-        debug("authenticated request", path, options);
         return requester(`${this.installation}${path}`, {
             ...options,
             headers: {
@@ -431,8 +491,8 @@ export default class APIClient extends EventEmitter {
         });
     }
 
-    getRoom(room) {
-        return this.request(`/chat/v2/rooms/${room}.json?includeUserData=true`);
+    getRoom(room, userData = true) {
+        return this.request(`/chat/v2/rooms/${room}.json${userData ? "?includeUserData=true" : ""}`);
     }
 
     getMessages(room) {
@@ -446,7 +506,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} limit       The number of conversations after the cursor to get.
      * @return {Promise<Array>}     The list of conversations. See Teamwork API Docs.
      */
-    getRooms(offset, limit) {
+    getRooms(offset = 0, limit = 15) {
         return this.requestList(`/chat/v2/conversations.json?includeMessageData=true&includeUserData=true` +
             `&sort=lastActivityAt`, { offset, limit });
     }

@@ -9,6 +9,7 @@ import Room from "./Room";
 const debug = Debug("tw-chat:person");
 
 export default class Person extends EventEmitter {
+    /** @type {Number} The user's id. */
     id;
 
     /** @type {String} User's @ handle. e.g. @adrianc*/
@@ -23,15 +24,16 @@ export default class Person extends EventEmitter {
     /** @type {String} User's email. */
     email;
 
-    /** @type {moment} Date of user's last activity. */
+    /** @type {String} The user's title e.g. "Developer" or "Accounts Manager" */
+    title;
+
+    /** @type {moment} Date of user's last activity with the currently logged in user. */
     lastActivity = null;
 
     constructor(api, details) {
         super();
         
         this.api = api;
-
-        this.update(details);
 
         // Node warns us that this is a potential "memory leak" however it is untrue (although it may be a sign of leaks to come).
         // Rooms (i.e. all the rooms) listen for the "update" event on people so they can appropriately act on the information
@@ -54,6 +56,10 @@ export default class Person extends EventEmitter {
             this.room.addPerson(this);
         } else {
             this.room = new Room(api, { id: "root" });
+        }
+
+        if(details) {
+            this.update(details);
         }
     }
 
@@ -79,17 +85,19 @@ export default class Person extends EventEmitter {
         if(details.lastActivityAt) update.lastActivity = moment(details.lastActivityAt);
 
         update = Object.assign(omit(details, [
-            "lastActivityAt"
+            "lastActivityAt",
+            "roomId"
         ]), update);
 
         let person = Object.assign(this, update);
         this.emit("update", person, update);
 
-        return person;
-    }
+        // If we have a roomId, add it to the pair room
+        if(details.roomId) {
+            this.room.update({ id: details.roomId });
+        }
 
-    addPerson() {
-        throw new Error("Cannot add another person to a pair room. Find or create new room with participants.");
+        return person;
     }
 
     get lastSeen() {
@@ -112,6 +120,6 @@ export default class Person extends EventEmitter {
     }
 
     inspect() {
-        return `Person{id = ${this.id}, @${this.handle}, "${this.firstName} ${this.lastName}", ${this.status}, last seen: ${this.lastSeen}}`;
+        return `Person{id = ${this.id}, @${this.handle}, "${this.firstName} ${this.lastName}", ${this.status}}`;
     }
 }

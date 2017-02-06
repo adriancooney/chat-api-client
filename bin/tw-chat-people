@@ -1,0 +1,27 @@
+#!/usr/bin/env babel-node
+import { sortBy } from "lodash";
+import TeamworkChat from "..";
+import { command, getUser } from "./lib/cli";
+
+command(program => {
+    program
+        .option("--handles", "show user handles only")
+        .option("--json", "output in json")
+        .parse(process.argv);
+
+    return TeamworkChat.withCredentials(...getUser(), chat => {
+        return chat.getAllPeople().then(people => {
+            sortBy(people, "handle").forEach(person => {
+                let output = person;
+
+                if(program.handles)
+                    output = `@${person.handle}`;
+
+                if(program.json)
+                    output = JSON.stringify(person);
+
+                console.log(output);
+            });
+        });
+    });
+});

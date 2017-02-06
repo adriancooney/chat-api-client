@@ -4,6 +4,15 @@ import pkg from "../package.json";
 
 program
     .version(pkg.version)
+    .allowUnknownOption()
     .command("message", "send a message to a user")
+    .command("messages", "list messages for rooms")
+    .command("unseen", "get the unseen message count")
+    .command("status", "update user status")
+    .command("active", "update room activity")
+    .command("typing", "update typing status for room")
     .command("listen", "listen for chat events")
+    .command("rooms", "list rooms")
+    .command("people", "list people")
+    .command("user", "manage the login user")
     .parse(process.argv);

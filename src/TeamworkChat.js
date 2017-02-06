@@ -1,7 +1,7 @@
 import Promise from "bluebird";
 import Debug from "debug";
 import { inspect } from "util";
-import { omit, values, flatten, without, uniqBy } from "lodash";
+import { omit, values, flatten, without, uniqBy, intersection } from "lodash";
 import APIClient from "./APIClient";
 import Room from "./Room";
 import Person from "./Person";
@@ -33,7 +33,7 @@ export default class TeamworkChat extends Person {
         this.update(user.user);
         this.room.addPerson(this);
 
-        this.api.on("connected", this.emit.bind(this, "connected"));
+        this.api.once("connected", this.emit.bind(this, "connected"));
         this.api.on("frame", this.onFrame.bind(this));
         this.api.on("close", this.onDisconnect.bind(this));
 
@@ -131,11 +131,19 @@ export default class TeamworkChat extends Person {
         throw new Error("Illegal operation: cannot send to self.");
     }
 
+    createRoomWithHandles(handles) {
+        return Promise.all(handles.map(this.getPersonByHandle.bind(this))).then(people => {
+            return new Room(this.api, undefined, people);
+        });
+    }
+
     getRoomForHandles(handles) {
         if(handles.length === 1 || (handles.length === 2 && handles.includes(this.handle))) {
             return this.getPersonByHandle(without(handles, this.handle)[0]).then(person => person.room);
         } else {
-            return Promise.all(handles.map(this.getPersonByHandle.bind(this))).then(people => {
+            let room = this.findRoomForHandles(handles);
+
+            if(!room) {
                 // Workaround: The Chat API doesn't directly have an API to get a room by user's
                 // handles. What it does have though is if you attempt to send a message to a bunch
                 // of handles, it will either return the room ID containing all the users or create
@@ -146,9 +154,38 @@ export default class TeamworkChat extends Person {
                     "uninitialized. To initialize, send a message using `sendMessage`."
                 );
 
-                return new Room(this.api, undefined, people);
-            });
+                return this.createRoomWithHandles(handles);
+            } else return Promise.resolve(room);
         }
+    }
+
+    getUnseenCount() {
+        return this.api.getUnseenCount().then(({ contents }) => {
+            const conv = contents.conversationUnreadCounts;
+            const room = contents.unreadCounts;
+
+            return {
+                important: {
+                    rooms: room.importantUnread,
+                    conversations: conv ? conv.importantUnread : null
+                },
+
+                total: {
+                    rooms: room.unread,
+                    conversations: conv ? conv.unread : null
+                }
+            };
+        });
+    }
+
+    updateStatus(status) {
+        return this.api.updateStatus(status);
+    }
+
+    findRoomForHandles(handles) {
+        return this.rooms.find(room => {
+            return intersection(room.people.map(person => person.handle), handles).length === handles.length;
+        });
     }
 
     addRoom(room) {
@@ -159,6 +196,7 @@ export default class TeamworkChat extends Person {
         // Emit the new room event
         this.emit("room:new", room);
 
+        debug("new room", room);
         this.rooms.push(room);
 
         return room;
@@ -220,9 +258,13 @@ export default class TeamworkChat extends Person {
 
     getAllRooms() {
         return this.getRooms().then(rooms => {
-            return [rooms, this.getRooms(rooms.limit, rooms.total - rooms.limit)];
-        }).spread((rooms, rest) => {
-            return rooms.concat(rest);
+            const limit = rooms.total - rooms.limit;
+
+            if(limit > 0) {
+                return this.getRooms(rooms.limit, limit).then(rest => rooms.concat(rest));
+            } else {
+                return rooms;
+            }
         });
     }
 
@@ -262,7 +304,9 @@ export default class TeamworkChat extends Person {
     }
 
     getPersonByHandle(handle) {
-        return this.getPersonBy("handle", handle);
+        return this.getPersonBy("handle", handle).then(person => {
+            return person;
+        });
     }
 
     getPersonById(id) {
@@ -289,13 +333,17 @@ export default class TeamworkChat extends Person {
         return this.room.addPeople(people);
     }
 
+    getPeople(offset, limit) {
+        return this.api.getPeople(offset, limit).then(({ people }) => people.map(this.savePerson.bind(this)));
+    }
+
     getAllPeople() {
-        return this.api.getPeople().then(({ people }) => people.map(this.savePerson.bind(this)));
+        return this.getPeople();
     }
 
     toJSON() {
         return {
-            user: super.toJSON(),
+            ...super.toJSON(),
             api: this.api
         };
     }
@@ -305,6 +353,10 @@ export default class TeamworkChat extends Person {
     }
 
     close() {
+        // Don't attempt to close the socket a second time
+        if(this.forceClosed) 
+            return;
+
         this.forceClosed = true;
         this.api.close();
     }
@@ -318,8 +370,29 @@ export default class TeamworkChat extends Person {
     }
 
     static fromCredentials(installation, username, password) {
+        debug(`logging in with user ${username} to ${installation}.`);
         return APIClient.loginWithCredentials(installation, username, password).then(api => {
             return new TeamworkChat(api, api.user);
         });
+    }
+
+    /**
+     * Use TeamworkChat with a promise "disposer" pattern. This is like `fromCredentials` except
+     * you pass it a callback where you use the first parameter, `chat` (the initialized TeamworkChat)
+     * instance and return any promise. When that returned promises finishes execution (regardless of
+     * outcome -- rejection or resolving), the `disposer` function is called and the socket to Chat is
+     * closed. This allows the process to exit appropriately and ensures any open sockets are closed.
+     * 
+     * @param  {String}   installation The fully qualified installation URL.
+     * @param  {String}   username     The username used to login to Teamwork.
+     * @param  {String}   password     The password used to login to Teamwork (disposed after initial login request).
+     * @param  {Function} callback     The callback (!) that has param `chat` TeamworkChat instance. This returns
+     *                                 a promise that when complete, closes the connection to Teamwork.
+     * @return {Promise}               Resolves to nothing but ensures connection to Teamwork is closed fully.
+     */
+    static withCredentials(installation, username, password, callback) {
+        return Promise.using(TeamworkChat.fromCredentials(installation, username, password).disposer(chat => {
+            chat.close();
+        }), callback);
     }
 }

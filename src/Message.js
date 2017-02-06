@@ -1,8 +1,40 @@
+import moment from "moment";
 import { omit } from "lodash";
 
 export default class Message {
     /** @type {String} The message content. */
     content;
+
+    /** @type {Number} The message id. */
+    id;
+
+    /** @type {Number} The room ID of the message. */
+    roomId;
+
+    /** @type {Number} The author's ID. */
+    userId;
+
+    /**
+     * The "status" of a message. It can contain one of two values (I've found):
+     * 
+     *   - "active" - Message is unchanged.
+     *   - "redacted" - Message has been removed.
+     *     
+     * @type {String}
+     */
+    status;
+
+    /** @type {Object} The message's file information. */
+    file;
+
+    /** @type {moment} The timestamp the message was created at. */
+    createdAt;
+
+    /** @type {Array} Array of data describing third party cards. */
+    thirdPartyCards;
+
+    /** @type {Boolean} Flag whether the user's account who created the message still exists. */
+    isUserActive;
 
     constructor(details) {
         if(typeof details === "string")
@@ -12,8 +44,9 @@ export default class Message {
     }
 
     update(details = {}) {
-        return Object.assign(this, omit(details, "body"), {
-            content: details.body
+        return Object.assign(this, omit(details, "body", "createdAt"), {
+            content: details.body,
+            createdAt: moment(details.createdAt)
         });
     }
 

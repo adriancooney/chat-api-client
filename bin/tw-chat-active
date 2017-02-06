@@ -1,0 +1,16 @@
+#!/usr/bin/env babel-node
+import TeamworkChat from "..";
+import { command, getUser } from "./lib/cli";
+
+command(program => {
+    program
+        .description("update room activity")
+        .option("-r, --room <id>", "the room to activate")
+        .parse(process.argv);
+
+    return TeamworkChat.withCredentials(...getUser(), chat => {
+        return chat.getRoom(program.room).then(room => {
+            return room.activate();
+        });
+    });        
+});

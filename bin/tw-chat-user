@@ -1,0 +1,37 @@
+#!/usr/bin/env babel-node
+import { padStart, intersection } from "lodash";
+import TeamworkChat from "../src/TeamworkChat";
+import { command, getUser } from "./lib/cli";
+
+command((program, config) => {
+    return new Promise((resolve, reject) => {
+        program
+            .command("list")
+            .description("list available users")
+            .action(() => {
+                Object.keys(config.users).forEach(key => {
+                    const { installation, username } = config.users[key];
+                    console.log(`${padStart(key, 8)} - ${username} / ${installation}`);
+                });
+
+                resolve();
+            });
+
+        program
+            .command("info")
+            .arguments("[user]")
+            .allowUnknownOption()
+            .action(user => {
+                return TeamworkChat.withCredentials(...getUser(user), chat => {
+                    console.log(user ? `User: ${user}` : `Default User: ${config.user}`);
+                    console.log(chat.toJSON());
+                }).then(resolve, reject);
+            });
+
+        // Default command is "info"
+        if(intersection(process.argv, program.commands.map(command => command._name)).length === 0)
+            process.argv.push("info");
+
+        program.parse(process.argv);
+    });
+});

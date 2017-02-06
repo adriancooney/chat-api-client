@@ -2,14 +2,13 @@
   "version": "0.0.1",
   "main": "src/index.js",
   "dependencies": {
-    "babel-core": "latest",
     "bluebird": "^3.4.7",
+    "colors": "^1.1.2",
     "debug": "^2.6.0",
-    "eventemitter2": "^3.0.0",
     "isomorphic-fetch": "^2.2.1",
     "lodash": "^4.17.4",
     "moment": "^2.17.1",
-    "sinon": "^2.0.0-pre.4",
+    "rc": "^1.1.6",
     "ws": "^1.1.1"
   },
   "devDependencies": {
@@ -18,7 +17,8 @@
     "babel-preset-latest": "^6.22.0",
     "babel-preset-stage-0": "^6.22.0",
     "babel-register": "^6.22.0",
-    "mocha": "^3.2.0"
+    "mocha": "^3.2.0",
+    "sinon": "^2.0.0-pre.4"
   },
   "scripts": {
     "test": "mocha --compilers js:babel-register --require babel-polyfill"

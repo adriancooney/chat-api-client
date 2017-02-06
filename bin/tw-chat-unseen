@@ -1,0 +1,11 @@
+#!/usr/bin/env babel-node
+import TeamworkChat from "..";
+import { command, getUser } from "./lib/cli";
+
+command(() => {
+    return TeamworkChat.withCredentials(...getUser(), chat => {
+        return chat.getUnseenCount().then(frame => {
+            console.log(frame);
+        });
+    });
+});

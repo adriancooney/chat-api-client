@@ -97,7 +97,7 @@ describe("TeamworkChat", function() {
                 });
             });
 
-            it.only("should send a message to a locally, non-existing room", done => {
+            it("should send a message to a locally, non-existing room", done => {
                 const stub = sinon.stub(APIClient, "request", (url, options) => {
                     const roomId = url.match(/rooms\/(\d+)\.json/)[1];
                     return Promise.resolve({ 
@@ -134,5 +134,22 @@ describe("TeamworkChat", function() {
                 });
             });
         });
-    })
+    });
+
+    describe("flows", () => {
+       let chat;
+        beforeEach(async () => {
+            chat = await devTeamworkChat();
+        });
+
+        describe("get people by handle and send message", () => {
+            it.only("should send a private message when you only want one user", async () => {
+                const peter = await chat.getPersonByHandle("peter");
+                // const room = await chat.getRoomForHandles(["peter"]);
+                console.log(peter.roomId);
+
+                // await room.sendMessage("room");
+            });
+        });
+    });
 });

@@ -1,0 +1,33 @@
+#!/usr/bin/env babel-node
+import { max, padStart } from "lodash";
+import TeamworkChat from "..";
+import { command, getUser } from "./lib/cli";
+
+command(program => {
+    program
+        .option("-r, --room <id>", "the room id", parseInt)
+        .option("--json", "output in json")
+        .parse(process.argv);
+
+    return TeamworkChat.withCredentials(...getUser(), chat => {
+        return chat.getRoom(program.room).then(room => {
+            return room.getMessages();
+        }).then(messages => {
+            messages.sort((a, b) => a.createdAt.isAfter(b.createdAt) ? 1 : -1);
+
+            if(program.json) {
+                messages.forEach(message => console.log(JSON.stringify(message)));
+            } else {
+                messages = messages.map(message => {
+                    return [message.createdAt.fromNow(), `@${message.author.handle}: ${message.content}`];
+                });
+
+                const timeWidth = max(messages.map(([ timestamp ]) => timestamp.length));
+
+                messages.forEach(([timestamp, message]) => {
+                    console.log(`${padStart(timestamp, timeWidth)} | ${message}`);
+                });
+            }
+        });
+    });
+});

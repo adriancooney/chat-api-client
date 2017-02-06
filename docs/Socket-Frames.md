@@ -63,7 +63,6 @@ Sent when a user changes to room.
 ```
 
 ### `unseen.counts.request` (request)
-
 Request frame:
 
 ```json
@@ -95,6 +94,23 @@ Response frame:
         },
         "conversationUnreadCounts": null,
         "connectionId": 2606784
+    }
+}
+```
+
+### `room.typing`
+Updating typing status.
+
+
+```json
+{
+    "validator": {},
+    "contentType": "object",
+    "name": "room.typing",
+    "contents": {
+        "isTyping": true,
+        "userId": 139099, // According to the chat-server code, this isn't used.
+        "roomId": 181552
     }
 }
 ```

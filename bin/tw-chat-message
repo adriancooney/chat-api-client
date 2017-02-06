@@ -1,22 +1,37 @@
 #!/usr/bin/env babel-node
-
-import program from "commander";
+import Promise from "bluebird";
 import TeamworkChat from "..";
-import { INSTALLATION, USERNAME, PASSWORD } from "../test";
+import { command, getUser } from "./lib/cli";
 
-program
-    .option("-t, --to <handle>", "The handle to send the message to.")
-    .option("-m, --message <message>", "The message content.")
-    .parse(process.argv);
+command(program => {
+    program
+        .option("-t, --to <handles>", "handles to send the message to e.g. -t adrian,topper,dan", handles => handles.split(","))
+        .option("-r, --room <id>", "the room to send the message to", parseInt)
+        .option("-m, --message <message>", "The message content.")
+        .option("-q, --quiet", "suppress warning")
+        .parse(process.argv);
 
-TeamworkChat.fromCredentials(INSTALLATION, USERNAME, PASSWORD).then(chat => {
-    return chat.getPersonByHandle(program.to).then(person => {
-        return person.sendMessage(program.message);
-    }).then(message => {
-        console.log("Message sent:", message);
-    }).finally(() => {
-        chat.close();
-    }).catch(err => {
-        console.error("Message not sent.", err);
+    if(!program.message)
+        throw new Error("Message flag not set.");
+
+    return TeamworkChat.withCredentials(...getUser(), chat => {
+        return Promise.try(() => {
+            if(program.room) {
+                return chat.getRoom(program.room);
+            } else {
+                if(program.to.length > 1 && !program.quiet) {
+                    console.warn(
+                        "Warning: Sending to multiple handles will always create a new room. To send a message to a " +
+                        "specific room, use the `-r` flag."
+                    );
+                }
+
+                return chat.getRoomForHandles(program.to);
+            }
+        }).then(room => {
+            return room.sendMessage(program.message);
+        }).then(message => {
+            console.log("Message sent:", message);
+        });
     });
 });

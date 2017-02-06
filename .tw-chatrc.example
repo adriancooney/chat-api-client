@@ -1,0 +1,16 @@
+{
+    "user": "dev",
+    "users": {
+        "dev": {
+            "installation": "http://sunbeam.teamwork.dev:5000",
+            "username": "donalin+dev1@gmail.com",
+            "password": "test"
+        },
+
+        "prod": {
+            "installation": "http://digitalcrew.teamwork.com",
+            "username": "<username>",
+            "password": "<password>"
+        }
+    }
+}
