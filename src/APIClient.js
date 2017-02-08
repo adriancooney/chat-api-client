@@ -71,6 +71,12 @@ export default class APIClient extends EventEmitter {
     awaiting = [];
 
     /**
+     * The current logged in user's account details returned from `me.json`
+     * @type {Object}
+     */
+    user;
+
+    /**
      * Create an authorized APIClient object.
      * 
      * @param  {String} installation The user's installation.
@@ -215,72 +221,85 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Connect to the Chat socket server.
-     * @return {Promise} Resolves when the server has successfully completed authentication.
+     * 
+     * @return {Promise<APIClient>} Resolves when the server has successfully completed authentication.
      */
     connect() {
-        return new Promise((resolve, reject) => {
-            const { hostname } = url.parse(this.installation);
-            const env = hostname.match(/teamwork.com/) ? "production" : "development"
-            let server = config[env].server;
+        return this.getProfile().then(res => {
+            // Save the logged in user's account to `user`;
+            this.user = res.account;
 
-            if(env === "development") {
-                server = {
-                    ...server, hostname
-                };
-            }
+            return new Promise((resolve, reject) => {
+                const { hostname } = url.parse(this.installation);
+                const env = hostname.match(/teamwork.com/) ? "production" : "development"
+                let server = config[env].server;
 
-            const socketServer = url.format({
-                ...server,
-                slashes: true
-            });
-
-            debug(`connecting socket server to ${socketServer}`);
-            this.socket = new APIClient.WebSocket(socketServer, {
-                headers: {
-                    Cookie: `tw-auth=${this.auth}`
+                if(env === "development") {
+                    server = {
+                        ...server, hostname
+                    };
                 }
-            });
 
-            this.socket.on("message", this.onSocketMessage.bind(this));
+                const socketServer = url.format({
+                    ...server,
+                    slashes: true
+                });
 
-            // Attach the reject handler for the error handler, see below for when we remove it
-            // and add the `onSocketError` handler instead when the authentication flow completes.
-            this.socket.on("error", reject);
-
-            this.socket.on("open", () => {
-                // Wait for the authentication request frame and send back the auth frame.
-                this.awaitFrame("authentication.request").then(message => {
-                    return this.sendFrame("authentication.response", {
-                        authKey: this.user.authkey,
-                        userId: parseInt(this.user.id),
-                        installationDomain: this.user.url,
-                        installationId: parseInt(this.user.installationId),
-                        clientVersion: pkg.version
-                    });
-                }).then(() => {
-                    return this.raceFrames("authentication.error", "authentication.confirmation");
-                }).then(frame => {
-                    if(frame.name === "authentication.error") {
-                        throw new Error(frame.contents);
+                debug(`connecting socket server to ${socketServer}`);
+                this.socket = new APIClient.WebSocket(socketServer, {
+                    headers: {
+                        Cookie: `tw-auth=${this.auth}`
                     }
+                });
 
-                    // Start the pinging to ensure our socket doesn't get disconnected for inactivity,
-                    // and to monitor our connection.
-                    this.nextPing();
+                this.socket.on("message", this.onSocketMessage.bind(this));
 
-                    this.emit("connected");
+                // Attach the reject handler for the error handler, see below for when we remove it
+                // and add the `onSocketError` handler instead when the authentication flow completes.
+                this.socket.on("error", reject);
 
-                    // Remove the "error" handler and replace it with the `onSocketError`.
-                    this.socket.removeListener("error", reject);
-                    this.socket.on("error", this.onSocketError.bind(this));
-                    this.socket.on("close", this.onSocketClose.bind(this));
+                this.socket.on("open", () => {
+                    // Wait for the authentication request frame and send back the auth frame.
+                    this.awaitFrame("authentication.request").then(message => {
+                        return this.sendFrame("authentication.response", {
+                            authKey: this.user.authkey,
+                            userId: parseInt(this.user.id),
+                            installationDomain: this.user.url,
+                            installationId: parseInt(this.user.installationId),
+                            clientVersion: pkg.version
+                        });
+                    }).then(() => {
+                        return this.raceFrames("authentication.error", "authentication.confirmation");
+                    }).then(frame => {
+                        if(frame.name === "authentication.error") {
+                            throw new Error(frame.contents);
+                        }
 
-                    resolve(this.socket);
-                }).catch(reject);
+                        // Start the pinging to ensure our socket doesn't get disconnected for inactivity,
+                        // and to monitor our connection.
+                        this.nextPing();
+
+                        // Remove the "error" handler and replace it with the `onSocketError`.
+                        this.socket.removeListener("error", reject);
+                        this.socket.on("error", this.onSocketError.bind(this));
+                        this.socket.on("close", this.onSocketClose.bind(this));
+
+                        resolve(this);
+
+                        this.emit("connected");
+                    }).catch(reject);
+                });
             });
         });
     }
 
+    /**
+     * Start sending ping frames (not Websocket pings) down the socket to ensure the server doesn't cut
+     * our connection. This STARTS the pinging and will resolve when you stop the pinging with `stopPing`.
+     * 
+     * @param  {Number} attempt PRIVATE: The number used to track which attempt were on, do not use.
+     * @return {Promise}        A promise that resolves when `stopPing` is called.
+     */
     nextPing(attempt = 0) {
         return new Promise((resolve, reject) => {
             debug("attempting ping");
@@ -312,6 +331,9 @@ export default class APIClient extends EventEmitter {
         });
     }
 
+    /**
+     * Stop sending the ping frames to the server.
+     */
     stopPing() {
         if(this._nextPingReject) {
             debug("stopping ping");
@@ -319,6 +341,11 @@ export default class APIClient extends EventEmitter {
         }
     }
 
+    /**
+     * Close the socket connection to the server. This IMMEDIATELY calls `onSocketClose`
+     * i.e. the `close` event. It doesn't wait for the underlying socket to close it's 
+     * connection to the server because it is SLOW.
+     */
     close() {
         // Closing a socket takes a while so to speed up the process, we
         // manually call `onSocketClose` and remove the original `close` event 
@@ -367,12 +394,23 @@ export default class APIClient extends EventEmitter {
         return this.sendFrame("user.modified.status", { status })
     }
 
+    /**
+     * Get the unseen counts from the server.
+     * 
+     * @return {Promise<Object>} Resolves to the unseen counts frame from the socket server.
+     */
     getUnseenCount() {
         return this.sendFrame("unseen.counts.request").then(() => {
             return this.awaitFrame("unseen.counts.updated");
         });
     }
 
+    /**
+     * Send the `room.user.active` frame for a room.This frame has no response, it's fire and forget.
+     * 
+     * @param  {Number} room        The room ID to send the room active frame for.
+     * @return {Promise<Object>}    Resolves to the sent frame.
+     */
     activateRoom(room) {
         return this.sendFrame("room.user.active", {
             roomId: room,
@@ -380,11 +418,29 @@ export default class APIClient extends EventEmitter {
         });
     }
 
-    typing(status, room) {
+    /**
+     * Send the `room.typing` frame for a room. This frame has no response, it's fire and forget.
+     * 
+     * @param  {Boolean} isTyping Whether typing or not.
+     * @param  {Number}  room     The room ID.
+     * @return {Promise<Object>}    Resolves to the sent frame.
+     */
+    typing(isTyping, room) {
         return this.sendFrame("room.typing", {
             isTyping: status,
             roomId: room
         });
+    }
+
+    /**
+     * Send a ping frame to the server. This socket request times out after
+     * PING_TIMEOUT and rejects the promise.
+     * 
+     * @param  {Number}         timeout The timeout before the socket request times out. Default: PING_TIMEOUT
+     * @return {Promise<Object>}        Resolves to the recieved ping frame.
+     */
+    ping(timeout = PING_TIMEOUT) {
+        return this.socketRequest("ping", {}, timeout);
     }
 
     /**
@@ -422,6 +478,15 @@ export default class APIClient extends EventEmitter {
         });
     }
 
+    /**
+     * Make an unauthenticated request for a list of items from the server with offset and limit.
+     * 
+     * @param  {String}    target          The URL target. See APIClient.request.
+     * @param  {Object}    options         The options object passed to APIClient.request.
+     * @param  {Number}    options.offset  The cursor offset.
+     * @param  {Number}    options.limit   The number of items to return after `offset`.
+     * @return {Promise<Response|Object>}  See APIClient.request return value.
+     */
     static requestList(target, { offset, limit, ...options } = {}) {
         let query = [];
 
@@ -429,7 +494,7 @@ export default class APIClient extends EventEmitter {
             query.push(`page%5Boffset%5D=${offset}`);
 
         if(typeof limit !== "undefined") 
-            query.push(`&page%5Blimit%5D=${limit}`);
+            query.push(`page%5Blimit%5D=${limit}`);
 
         if(query.length) {
             query = query.join("&");
@@ -444,7 +509,7 @@ export default class APIClient extends EventEmitter {
      *
      * @param  {String} path                The path part of the URL to be appended to the user installation for the request.
      * @param  {Object} options             See APIClient.request.
-     * @return {Promise<Object|Response>}   See APIClient.request.
+     * @return {Promise<Object|Response>}   See APIClient.request return value.
      */
     request(path, options = {}, requester = APIClient.request) {
         return requester(`${this.installation}${path}`, {
@@ -456,12 +521,15 @@ export default class APIClient extends EventEmitter {
         });
     }
 
+    /**
+     * Make an authenticated request for a list of items from the server with offset and limit.
+     * 
+     * @param  {String}    target          The URL target. See APIClient.request.
+     * @param  {Object}    options         The options object passed to APIClient.requestList.
+     * @return {Promise<Response|Object>}  See APIClient.request return value.
+     */
     requestList(path, options) {
         return this.request(path, options, APIClient.requestList);
-    }
-
-    ping(timeout = 3000) {
-        return this.socketRequest("ping", {}, timeout);
     }
 
     /**
@@ -473,10 +541,24 @@ export default class APIClient extends EventEmitter {
         return this.request("/chat/me.json?includeAuth=true");
     }
 
+    /**
+     * GET /chat/v2/people.json - Return a list of people.
+     * 
+     * @param  {Number} offset    The cursor offset on the list of people.
+     * @param  {Number} limit     The amount of people to return after the cursor offset.
+     * @return {Promise<Object>}  The list of people.
+     */
     getPeople(offset, limit) {
         return this.requestList("/chat/v2/people.json", { offset, limit });
     }
 
+    /**
+     * POST /chat/v2/rooms.json - Create a new room with handles and an initial message.
+     * 
+     * @param  {Array<String>}  handles  Array of user handles (without `@` symbol).
+     * @param  {String}         message  The initial message for the new room.
+     * @return {Promise<Object>}         The server response with the room ID.
+     */
     createRoom(handles, message) {
         return this.request("/chat/v2/rooms.json", {
             method: "POST",
@@ -491,12 +573,15 @@ export default class APIClient extends EventEmitter {
         });
     }
 
+    /**
+     * GET /chat/v2/rooms/<room>.json - Get a room from the server.
+     * 
+     * @param  {Number}          room     The room ID.
+     * @param  {Boolean}         userData Include user data or not.
+     * @return {Promise<Object>}          Return a room object from the API.
+     */
     getRoom(room, userData = true) {
         return this.request(`/chat/v2/rooms/${room}.json${userData ? "?includeUserData=true" : ""}`);
-    }
-
-    getMessages(room) {
-        return this.request(`/chat/v2/rooms/${room}/messages.json`);
     }
 
     /**
@@ -512,7 +597,26 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
-     * GET /launchpad/v1/accounts.json (authenticate.teamwork.com) - Return a user's accounts.
+     * GET /chat/v2/rooms/<room>/messages.json - Get messages for a room.
+     *  
+     * @param  {Number} room The room ID.
+     * @return {Object}      The messages return from the API.
+     */
+    getMessages(room) {
+        return this.request(`/chat/v2/rooms/${room}/messages.json`);
+    }
+
+    /**
+     * DELETE /launchpad/v1/login.json - Logout from Teamwork.
+     * 
+     * @return {Promise<Object>} Value returned from server.
+     */
+    logout() {
+        return this.request(`/launchpad/v1/logout.json`, { method: "DELETE" });
+    }
+
+    /**
+     * GET authenticate.teamwork.com/launchpad/v1/accounts.json - Return a user's accounts.
      * 
      * @param  {String} username    The user's username.
      * @param  {String} password    The user's password.
@@ -529,13 +633,32 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
-     * POST /launchpad/v1/login.json - Login and connect to the chat server.
+     * POST <installation>/launchpad/v1/login.json - Login to Teamwork with credentials.
+     * @param  {String}  installation   The user's installation hostname.
+     * @param  {String}  username       The user's username.
+     * @param  {String}  password       The user's password.
+     * @param  {Boolean} raw            Resolve the raw response object or not. Default: true
+     * @return {Promise<Response>}      Resolves to the raw response object.
+     */
+    static login(installation, username, password, raw = true) {
+        return APIClient.request(`${installation}/launchpad/v1/login.json`, {
+            raw,
+            method: "POST",
+            body: {
+                username, password,
+                rememberMe: true
+            }
+        });
+    }
+
+    /**
+     * Login and connect to the chat server.
      * 
-     * @param  {String} installation The user's installation hostname.
-     * @param  {String} username     The user's username.
-     * @param  {String} password     The user's password.
-     * @return {Promise<APIClient>}  Resolves to a new instance of APIClient that can make authenticated requests
-     *                               as the user. The user's details can be access at `APIClient.user`.
+     * @param  {String|Object}  installation The user's installation hostname.
+     * @param  {String}         username     The user's username.
+     * @param  {String}         password     The user's password.
+     * @return {Promise<APIClient>}          Resolves to a new instance of APIClient that can make authenticated requests
+     *                                       as the user. The user's details can be access at `APIClient.user`.
      */
     static loginWithCredentials(installation, username, password) {
         if(typeof installation === "object") {
@@ -549,14 +672,7 @@ export default class APIClient extends EventEmitter {
         installation = installation.replace(/\/$/, "");
 
         debug(`attempting to login with ${username} at ${installation}.`);
-        return APIClient.request(`${installation}/launchpad/v1/login.json`, {
-            raw: true,
-            method: "POST",
-            body: {
-                username, password,
-                rememberMe: true
-            }
-        }).then(res => {
+        return APIClient.login(installation, username, password).then(res => {
             if(res.ok) {
                 // Extract the tw-auth cookie from the responses
                 const cookies = res.headers.get("Set-Cookie");
@@ -570,13 +686,7 @@ export default class APIClient extends EventEmitter {
                 throw new Error(`Invalid login credentials for ${username}@${installation}.`);
             }
         }).then(api => {
-            return [api, api.getProfile()];
-        }).spread((api, res) => {
-            api.user = res.account;
-
-            return [api, api.connect()];
-        }).spread(api => {
-            return api;
+            return api.connect();
         });
     }
 
@@ -648,6 +758,21 @@ export default class APIClient extends EventEmitter {
         return `APIClient[authorized, auth=${this.auth}]`;
     }
 
+    /**
+     * Convert this instance to JSON (returns the data required to exactly recreate this instance).
+     *
+     * Example:
+     *
+     *      const { installation, auth } = chat.toJSON();
+     *
+     *      const newChat = new TeamworkChat(installation, auth);
+     *
+     *      newChat.connect().then(chat => {
+     *          // Connected chat!
+     *      });
+     *      
+     * @return {Object} Serialized TeamworkChat.
+     */
     toJSON() {
         return {
             auth: this.auth,

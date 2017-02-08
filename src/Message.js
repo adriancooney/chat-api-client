@@ -36,6 +36,12 @@ export default class Message {
     /** @type {Boolean} Flag whether the user's account who created the message still exists. */
     isUserActive;
 
+    /**
+     * Create a new Message.
+     * 
+     * @param  {Object} details Optional, passed to #update. See Message#update.
+     * @return {Message}
+     */
     constructor(details) {
         if(typeof details === "string")
             details = { body: details };
@@ -43,6 +49,11 @@ export default class Message {
         this.update(details);
     }
 
+    /**
+     * Update the message's details and do type conversions on the data.
+     * @param  {Object} details Message object returned from server.
+     * @return {Message}         The current message instance.
+     */
     update(details = {}) {
         return Object.assign(this, omit(details, "body", "createdAt"), {
             content: details.body,
@@ -50,6 +61,10 @@ export default class Message {
         });
     }
 
+    /**
+     * Convert to usable string output for `console.log`.
+     * @return {String}
+     */
     inspect() {
         return `Message{id = ${this.id}, "${this.content}"}`;
     }

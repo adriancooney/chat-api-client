@@ -15,6 +15,67 @@ const debug = Debug("tw-chat");
  */
 const RECONNECT_INTERVAL = 1000 * 3;
 
+/**
+ * TeamworkChat model.
+ *
+ * Takes care of creating, updating and deleting Person, Room and Message objects
+ * by accepting frames and handling fresh data.
+ *
+ * Events:
+ *
+ *      "user:update": ({Person} person, {Object} changes)
+ *
+ *          Emitted when the currently logged in user has been updated.
+ *
+ *      "person:new": ({Person} person)
+ *
+ *          A new person was added to the memory store. This DOES NOT MEAN a new
+ *          person was added to the company or projects, just that they have been
+ *          loaded into memory. Once they have all been loaded into memory and this
+ *          event happens, it's safe to assume the person was recently created in
+ *          projects.
+ *
+ *      "person:update": ({Person} person, {Object} changes)
+ *
+ *          A person was updated e.g. their status, "offline" to "online"
+ *
+ *      "message": ({Room} room, {Message} message)
+ *
+ *          When a room receives a message.
+ *
+ *      "room:new": ({Room} room)
+ *
+ *          When a new room is added. Again does does NOT MEAN a new room was created on the
+ *          server, only that it was loaded in memory. It can be assume however that after
+ *          all rooms are loaded into memory and this event is fired, a new room has been
+ *          created.
+ *
+ *      "room:update": ({Room} room, {Object} changes)
+ *
+ *          Emitted when a room is updated.
+ *
+ *      "pong":
+ *
+ *          Emitted when the client and server successfully completed the ping-pong frame
+ *          exchange. Happens a lot, you probably won't need this frame ..unless ..maybe
+ *          ..you like ping-pong.
+ *
+ *      "error": ({Error} error)
+ *
+ *          Emitted when an error occurs in the APIClient or processing an incoming frame.
+ *
+ *      "disconnect":
+ *
+ *          Emitted when the APIClient disconnects from the server. There is no need to
+ *          attempt to reconnect or anything related to re-establishing the connection,
+ *          the APIClient does that for you. This is just a notification to buffer messages
+ *          to be sent until reconnection.
+ *
+ *      "reconnect":
+ *
+ *          Emitted when the APIClient has disconnected and manages to reconnect to the API.     
+ *      
+ */
 export default class TeamworkChat extends Person {
     /**
      * The rooms store. We use an array instead of and object keyed with room IDs because
@@ -26,14 +87,18 @@ export default class TeamworkChat extends Person {
      */
     rooms = [];
 
+    /**
+     * Create a new TeamworkChat instance.
+     * @param  {APIClient}  api  An authorized APIClient instance.
+     * @param  {Object}     user User data to pass to Person#constructor.
+     * @return {TeamworkChat}
+     */
     constructor(api, user) {
         super(api, user);
 
         this.api.user = this;
-        this.update(user.user);
         this.room.addPerson(this);
 
-        this.api.once("connected", this.emit.bind(this, "connected"));
         this.api.on("frame", this.onFrame.bind(this));
         this.api.on("close", this.onDisconnect.bind(this));
 
@@ -73,7 +138,9 @@ export default class TeamworkChat extends Person {
     }
 
     /**
-     * Event Handler: when the APIClient's socket recieves a `frame`
+     * Event Handler: when the APIClient's socket recieves a `frame`. This is the handler that 
+     * reads the incoming frame's `name` and handles it appropriately.
+     * 
      * @param  {Object} frame Parsed socket frame.
      */
     onFrame(frame) {
@@ -131,14 +198,52 @@ export default class TeamworkChat extends Person {
         throw new Error("Illegal operation: cannot send to self.");
     }
 
-    createRoomWithHandles(handles) {
+    /**
+     * Create a room with the given handles. WARNING: This DOES NOT create the room
+     * server side unless you provide `initialMessage`. The Chat API doesn't have an API
+     * to create a room without the first message being sent. If you do not provide an
+     * initialMessage, the room will be created in the first `sendMessage` request.
+     * 
+     * @param  {Array<String>}  handles         The list of people's handles (without `@` symbol).
+     * @param  {String}         initialMessage  Optional initialMessage to initialize the room (i.e. server side).
+     * @return {Promise<Room>}                  The newly created room.
+     */
+    createRoomWithHandles(handles, initialMessage) {
         return Promise.all(handles.map(this.getPersonByHandle.bind(this))).then(people => {
             return new Room(this.api, undefined, people);
+        }).tap(room => {
+            if(initialMessage) 
+                return room.sendMessage(initialMessage);
         });
     }
 
+    /**
+     * Get a room containing (only) the people's handles. There's a couple of things to remember
+     * when using this method:
+     *
+     * 1. An existing room with the given handles will not be found unless it has been loaded in
+     *    memory (e.g. via getAllRooms). The Chat API does not allow you to find room containing
+     *    specific handles.
+     * 2. If a room is not found with the given handles, an uninitialized room is created and the
+     *    people are added. This room DOES NOT EXIST on the server until the first message is sent
+     *    using `Room#sendMessage`.
+     *
+     * Things to discuss: (TODO: discuss)
+     *
+     * 1. Should we load all the rooms (if they're not already loaded), then attempt to find the room?
+     *    This would be similiar to how `getPersonByHandle` works. It loads all people via `people.json` 
+     *    and then selects the user via their handle. This isn't ideal but it's how the Chat GUI Client
+     *    works. Should we use the same logic here?
+     *    
+     * @param  {Array<String>} handles The list of people's handles (without `@` symbol).
+     * @return {Promise<Room>}         The room.
+     */
     getRoomForHandles(handles) {
         if(handles.length === 1 || (handles.length === 2 && handles.includes(this.handle))) {
+            if(handles.length === 1 && handles.includes(this.handle)) {
+                throw new Error("Cannot get room for self.");
+            }
+
             return this.getPersonByHandle(without(handles, this.handle)[0]).then(person => person.room);
         } else {
             let room = this.findRoomForHandles(handles);
@@ -159,6 +264,16 @@ export default class TeamworkChat extends Person {
         }
     }
 
+    /**
+     * Returned the unseen message counts in the form of:
+     *
+     *  {
+     *    important: { rooms {Number}, conversations {Number} },
+     *    total: { rooms: {Number}, conversations: {Number} }
+     *  }
+     * 
+     * @return {Promise<Object>} Object containing message counts.
+     */
     getUnseenCount() {
         return this.api.getUnseenCount().then(({ contents }) => {
             const conv = contents.conversationUnreadCounts;
@@ -178,16 +293,34 @@ export default class TeamworkChat extends Person {
         });
     }
 
+    /**
+     * Update the user's status.
+     * 
+     * @param  {String} status See STATUS_TYPES exported from APIClient for available values.
+     * @return {Promise}       Resolves once frame is sent. There is no response from the server
+     *                         for this so it's fire and forget.
+     */
     updateStatus(status) {
         return this.api.updateStatus(status);
     }
 
+    /**
+     * Find a room locally that includes the handles.
+     * 
+     * @param  {Array<String>} handles  The people's handles (without `@`).
+     * @return {Room}                   The room, if any.        
+     */
     findRoomForHandles(handles) {
         return this.rooms.find(room => {
             return intersection(room.people.map(person => person.handle), handles).length === handles.length;
         });
     }
 
+    /**
+     * Add a room to TeamworkChat and emit the appropriate events.
+     * 
+     * @param {Room} room The room object.
+     */
     addRoom(room) {
         // Listen to updates on the room object and proxy them through this instance
         room.on("message", this.emit.bind(this, "message", room));
@@ -202,6 +335,13 @@ export default class TeamworkChat extends Person {
         return room;
     }
 
+    /**
+     * Save the room data from the API response to the appropriate room or create a new
+     * room and add it if it does not exist.
+     * 
+     * @param  {Object} rawRoom The room returned from the API.
+     * @return {Room}           The saved or created room.
+     */
     saveRoom(rawRoom) {
         let room = this.findRoomById(rawRoom.id);
 
@@ -225,6 +365,13 @@ export default class TeamworkChat extends Person {
         }
     }
 
+    /**
+     * Get a room by ID. This attempts to find it in memory, if it does not exist,
+     * it is loaded from the server and saved.
+     * 
+     * @param  {Number} id        The room ID.
+     * @return {Promise<Room>}    Resolves to the requested room.
+     */
     getRoom(id) {
         const room = this.findRoomById(id);
 
@@ -233,10 +380,24 @@ export default class TeamworkChat extends Person {
         } else return Promise.resolve(room);
     }
 
+    /**
+     * Find a room by ID locally.
+     * 
+     * @param  {Number} id The room's id.
+     * @return {Room}
+     */
     findRoomById(id) {
         return this.rooms.find(room => room.id === id);
     }
 
+    /**
+     * Get rooms from the server and save in memory.
+     * 
+     * @param  {Number} offset   The cursor offset.
+     * @param  {Number} limit    The room count after the cursor.
+     * @return {Promise<Room[]>} The list of rooms. The array also contains some extra properties:
+     *                           offset, limit, total which are returned from the API.
+     */
     getRooms(offset, limit) {
         return this.api.getRooms(offset, limit).then(res => {
             // First, we need to create the people. This creates the direct conversation
@@ -256,6 +417,11 @@ export default class TeamworkChat extends Person {
         });
     }
 
+    /**
+     * Get all the rooms from the API and save in memory.
+     * 
+     * @return {Promise<Room[]>} The list of rooms.
+     */
     getAllRooms() {
         return this.getRooms().then(rooms => {
             const limit = rooms.total - rooms.limit;
@@ -268,15 +434,25 @@ export default class TeamworkChat extends Person {
         });
     }
 
+    /**
+     * Find a person in memory.
+     * 
+     * @param  {Number} id The person's ID.
+     * @return {Person}
+     */
     findPersonById(id) {
         return this.room.findPersonById(id);
     }
-    
-    getPerson(id) {
-        // This poses the same problems as 
-        return this.room.getPerson(id);
-    }
 
+    /**
+     * Find a person by a specific property. WARNING: If the person is not found in memory, 
+     * `getAllPeople` is called and ALL PEOPLE are loaded from the API. The requested user is
+     * then plucked from the returned values.
+     * 
+     * @param  {String} property The Person object's property to compare e.g. "id"
+     * @param  {String} value    The value to compare Person[property]. If it matches, the person object is returned.
+     * @return {Promise<Person>} The found person object.
+     */
     getPersonBy(property, value) {
         let person = values(this.room.people).find(person => person[property] === value);
 
@@ -297,22 +473,57 @@ export default class TeamworkChat extends Person {
                 const search = people.find(person => person[property] === value);
 
                 if(!search) {
-                    throw new Error(`No person found with ${property} "${handle}".`);
+                    throw new Error(`No person found with ${property} "${value}".`);
                 } else return search;
             });
         } else return Promise.resolve(person);
     }
 
+    /**
+     * Find or get a user by handle and save them.
+     * 
+     * @param  {String} handle  The user's handle (without `@`)
+     * @return {Promise<Person>}
+     */
     getPersonByHandle(handle) {
-        return this.getPersonBy("handle", handle).then(person => {
-            return person;
-        });
+        return this.getPersonBy("handle", handle);
     }
 
+    /**
+     * Get a person by ID and save them.
+     * 
+     * @param  {Number} id  The person's ID.
+     * @return {Promise<Person>}
+     */
     getPersonById(id) {
         return this.getPersonBy("id", id);
     }
 
+    /**
+     * Get list of people and save them.
+     * 
+     * @param  {Number} offset      The cursor offset.
+     * @param  {Number} limit       The person count to return after the cursor.
+     * @return {Promise<Person[]>}  The returned people list.
+     */
+    getPeople(offset, limit) {
+        return this.api.getPeople(offset, limit).then(({ people }) => people.map(this.savePerson.bind(this)));
+    }
+
+    /**
+     * Get all available people and save them.
+     * @return {[type]} [description]
+     */
+    getAllPeople() {
+        return this.getPeople();
+    }
+
+    /**
+     * Save or create a person's data from the API.
+     * 
+     * @param  {Object} rawPerson The person object from the API.
+     * @return {Person}           The updated person.
+     */
     savePerson(rawPerson) {
         let person = this.findPersonById(rawPerson.id);
 
@@ -325,33 +536,29 @@ export default class TeamworkChat extends Person {
         }
     }
 
+    /**
+     * Add a person to global room.
+     * 
+     * @param {Person} person
+     */
     addPerson(person) {
         return this.room.addPerson(person);
     }
 
+    /**
+     * Add multiple person objects at once.
+     * 
+     * @param {Array<Person>} people
+     */
     addPeople(people) {
         return this.room.addPeople(people);
     }
 
-    getPeople(offset, limit) {
-        return this.api.getPeople(offset, limit).then(({ people }) => people.map(this.savePerson.bind(this)));
-    }
-
-    getAllPeople() {
-        return this.getPeople();
-    }
-
-    toJSON() {
-        return {
-            ...super.toJSON(),
-            api: this.api
-        };
-    }
-
-    inspect() {
-        return `TeamworkChat{current user, ${inspect(this.api)}}`;
-    }
-
+    /**
+     * Close the connection to Teamwork Chat servers and logout.
+     * 
+     * @return {Promise} Resolves when logout is complete.
+     */
     close() {
         // Don't attempt to close the socket a second time
         if(this.forceClosed) 
@@ -359,16 +566,61 @@ export default class TeamworkChat extends Person {
 
         this.forceClosed = true;
         this.api.close();
+
+        debug("logging out");
+        return this.api.logout();
     }
 
+    /**
+     * Override the default `emit` method to convert any `update` events to `user:update`
+     * events. The `update` event happens in the parent Person class when the object is
+     * update via the `update` method. Having an `update` event on this class doesn't make
+     * sense so instead we convert updates to the currently logged in user as `user:update`.
+     *
+     * @override
+     */
     emit(eventName, ...args) {
-        // Convert Person "update" event to "user:update". Quite hacky but works. 
+        // Convert Person "update" event (i.e. on the TeamworkChat instance) to "user:update".
         if(eventName === "update")
             eventName = "user:update";
 
         return super.emit(eventName, ...args);
     }
 
+    /**
+     * Serialize the current user to JSON but include the API details. Don't forget, this is also
+     * a Person object.
+     * 
+     * @return {Object}
+     */
+    toJSON() {
+        return {
+            ...super.toJSON(),
+            api: this.api
+        };
+    }
+
+    /**
+     * Convert the TeamworkChat to a useful debug string for `util.inspect`.
+     * 
+     * @return {String} 
+     */
+    inspect() {
+        return `TeamworkChat{current user, ${inspect(this.api)}}`;
+    }
+
+    /**
+     * Login to the Teamwork Chat API, open a socket to the chat-server and complete
+     * the authentication flow. The API Client takes care of pings and disconnection
+     * so all you need to worry about is closing the instance via `close` when you are
+     * done. Otherwise, you can use `withCredentials` to automatically clean up and 
+     * log the user out when complete (recommended). See TeamworkChat.withCredentials.
+     * 
+     * @param  {String}   installation  The fully qualified installation URL.
+     * @param  {String}   username      The username used to login to Teamwork.
+     * @param  {String}   password      The password used to login to Teamwork (disposed after initial login request).
+     * @return {Promise<TeamworkChat>}  An authorized and fully connected TeamworkChat instance.
+     */
     static fromCredentials(installation, username, password) {
         debug(`logging in with user ${username} to ${installation}.`);
         return APIClient.loginWithCredentials(installation, username, password).then(api => {
@@ -382,6 +634,7 @@ export default class TeamworkChat extends Person {
      * instance and return any promise. When that returned promises finishes execution (regardless of
      * outcome -- rejection or resolving), the `disposer` function is called and the socket to Chat is
      * closed. This allows the process to exit appropriately and ensures any open sockets are closed.
+     * This will also *log the user out* when complete rendering the `tw-auth` token is useless.
      * 
      * @param  {String}   installation The fully qualified installation URL.
      * @param  {String}   username     The username used to login to Teamwork.
@@ -392,7 +645,7 @@ export default class TeamworkChat extends Person {
      */
     static withCredentials(installation, username, password, callback) {
         return Promise.using(TeamworkChat.fromCredentials(installation, username, password).disposer(chat => {
-            chat.close();
+            return chat.close();
         }), callback);
     }
 }

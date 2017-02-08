@@ -8,11 +8,36 @@ import Room from "./Room";
 
 const debug = Debug("tw-chat:person");
 
+/**
+ * Person model.
+ *
+ * Events:
+ *
+ *  "update": ({Person} person, {Object} changes)
+ *  
+ *      Emitted when the person object has been updated.
+ *
+ *  "message": ({Message} message)
+ *
+ *      Emitted when the direct conversation gets a new message. This is fired
+ *      when the a message is sent or received.
+ *
+ *  "message:sent": ({Message} message)
+ *
+ *      Emitted when the currently logged in user sends a message to the current
+ *      Person object.
+ *
+ *  "message:received": ({Message} message)
+ *
+ *      Emitted when the currently logged in user receives a message from the
+ *      current Person object.
+ * 
+ */
 export default class Person extends EventEmitter {
     /** @type {Number} The user's id. */
     id;
 
-    /** @type {String} User's @ handle. e.g. @adrianc*/
+    /** @type {String} User's @ handle (e.g. "adrianc") *without* the `@` symbol. */
     handle;
 
     /** @type {String} User's first name. */
@@ -30,6 +55,13 @@ export default class Person extends EventEmitter {
     /** @type {moment} Date of user's last activity with the currently logged in user. */
     lastActivity = null;
 
+    /**
+     * Create a new Person object.
+     * 
+     * @param  {APIClient}  api     The authorized API Client instance.
+     * @param  {Object}     details Optional, the person details to pass to Person#Update.
+     * @return {Person}
+     */
     constructor(api, details) {
         super();
         
@@ -58,26 +90,42 @@ export default class Person extends EventEmitter {
             this.room = new Room(api, { id: "root" });
         }
 
+        // Proxy the message listener
+        this.room.on("message", this.onMessage.bind(this));
+
         if(details) {
             this.update(details);
         }
     }
 
-    sendMessage(message) {
-        if(this.peopleCount === 1)
-            Promise.reject(new Error("Cannot send message to self!"));
+    /**
+     * Event Handler: When a room receives a message.
+     * 
+     * @param  {Message} message The new message object.
+     */
+    onMessage(message) {
+        this.emit("message", message);
 
-        return Promise.try(() => {
-            if(!this.room.initialized && this.roomId) {
-                return this.api.getRoom(this.roomId).then(({ room }) => {
-                    this.room.update(omit(room, "people"))
-                });
-            }
-        }).then(() => {
-            return this.room.sendMessage(message);
-        });
+        const direction = this.message.userId === this.api.user.id ? "sent" : "received";
+        this.emit(`message:${direction}`, message);
     }
 
+    /**
+     * Send a message to this person instance.
+     * 
+     * @param  {String} message     The string message.
+     * @return {Promise<Message>}   Resolves to the sent message.
+     */
+    sendMessage(message) {
+        return this.room.sendMessage(message);
+    }
+
+    /**
+     * Update the current Person object.
+     * 
+     * @param  {Object} details Person details (from API).
+     * @return {Person}         The current person instance.
+     */
     update(details) {
         let update = {};
 
@@ -100,10 +148,11 @@ export default class Person extends EventEmitter {
         return person;
     }
 
-    get lastSeen() {
-        return this.lastActivity ? this.lastActivity.fromNow() : "unknown";
-    }
-
+    /**
+     * Serialize the Person.
+     * 
+     * @return {Object}
+     */
     toJSON() {
         return {
             id: this.id,
@@ -115,10 +164,18 @@ export default class Person extends EventEmitter {
         };
     }
 
+    /**
+     * Convert the Person to a string.
+     * @return {String} e.g. `@adrianc`
+     */
     toString() {
         return `@${this.handle}`;
     }
 
+    /**
+     * Convert Person object to useful debug string (`util.inspect`).
+     * @return {String}
+     */
     inspect() {
         return `Person{id = ${this.id}, @${this.handle}, "${this.firstName} ${this.lastName}", ${this.status}}`;
     }
