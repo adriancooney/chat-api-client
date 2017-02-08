@@ -1,5 +1,5 @@
 # Socket Frames
-### `room.message.created` (recieved)
+### `room.message.created` (received)
 Fired when a message is created. 
 
 ```json
@@ -24,7 +24,7 @@ Fired when a message is created.
 }
 ```
 
-### `user.modified` (recieved)
+### `user.modified` (received)
 Update a user's value.
 
 ```json
@@ -37,6 +37,20 @@ Update a user's value.
         "shard": 6,
         "key": "status",
         "value": "away"
+    }
+}
+```
+
+### `user.updated` (received)
+Happens when a user has been updated in projects and need's to be updated from the API.
+
+```json
+{
+    "validator": {},
+    "contentType": "object",
+    "name": "user.updated",
+    "contents": {
+        "id": 139099
     }
 }
 ```
