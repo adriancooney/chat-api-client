@@ -1,11 +1,11 @@
 import { inspect } from "util";
 import Promise from "bluebird";
-import Debug from "debug";
+import createDebug from "debug";
 import { values, size, omit, last } from "lodash";
 import EventEmitter from "./lib/EventEmitter";
 import Message from "./Message";
 
-const debug = Debug("tw-chat:room");
+const debug = createDebug("tw-chat:room");
 
 export default class Room extends EventEmitter {
     /** @type {Array} The messages store for this room. */

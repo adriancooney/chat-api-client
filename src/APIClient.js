@@ -1,7 +1,7 @@
 import url from "url";
 import { inspect } from "util";
 import { EventEmitter } from "events";
-import Debug from "debug";
+import createDebug from "debug";
 import WebSocket from "ws";
 import fetch from "isomorphic-fetch";
 import Promise, { CancellationError, TimeoutError } from "bluebird";
@@ -10,7 +10,7 @@ import { without, omit, isEqual } from "lodash";
 import config from "../config.json";
 import pkg from "../package.json";
 
-const debug = Debug("tw-chat:api");
+const debug = createDebug("tw-chat:api");
 
 /**
  * The time in ms between pings.

@@ -1,5 +1,5 @@
 import Promise from "bluebird";
-import Debug from "debug";
+import createDebug from "debug";
 import { inspect } from "util";
 import { omit, values, flatten, without, uniqBy, intersection } from "lodash";
 import APIClient from "./APIClient";
@@ -7,7 +7,7 @@ import Room from "./Room";
 import Person from "./Person";
 import Message from "./Message";
 
-const debug = Debug("tw-chat");
+const debug = createDebug("tw-chat");
 
 /**
  * The time in ms to wait between reconnection attempts.
