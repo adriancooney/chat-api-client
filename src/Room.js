@@ -37,10 +37,6 @@ export default class Room extends EventEmitter {
         return this.people;
     }
 
-    getPerson(id) {
-        return Promise.resolve(this.findPersonById(id));
-    }
-
     findPersonById(id) {
         return this.people.find(person => person.id === id);
     }
@@ -108,7 +104,7 @@ export default class Room extends EventEmitter {
      * conversation but it doesn't look like it does.
      * 
      * @param  {String}  message     Message content.
-     * @return {Promise}              
+     * @return {Promise<Message>}    Resolves to the sent message.              
      */
     sendMessage(message) {
         message = new Message(message);
