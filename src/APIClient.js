@@ -553,6 +553,30 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
+     * GET /chat/people/<id>.json - Get a person by ID.
+     * 
+     * @param  {Number}         id  The person's ID.
+     * @return {Promise<Object>}    Person object response.
+     */
+    getPerson(id) {
+        return this.request(`/chat/people/${id}.json`);
+    }
+
+    /**
+     * PUT /chat/people/<id>.json - Update a persons details.
+     * 
+     * @param  {Number}          id     The person's ID.
+     * @param  {Object}          update The update object.
+     * @return {Promise<Object>}        The API response object.
+     */
+    updatePerson(id, update) {
+        return this.request(`/chat/people/${id}.json`, {
+            method: "PUT",
+            body: update
+        });
+    }
+
+    /**
      * POST /chat/v2/rooms.json - Create a new room with handles and an initial message.
      * 
      * @param  {Array<String>}  handles  Array of user handles (without `@` symbol).

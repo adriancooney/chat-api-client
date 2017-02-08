@@ -294,6 +294,18 @@ export default class TeamworkChat extends Person {
     }
 
     /**
+     * Update the currently logged in user's handle.
+     * 
+     * @param  {String}       handle The user's handle (without the `@`).
+     * @return {TeamworkChat}        The updated user.
+     */
+    updateHandle(handle) {
+        return this.api.updateHandle(handle).then(() => {
+            this.update({ handle });
+        });
+    }
+
+    /**
      * Update the user's status.
      * 
      * @param  {String} status See STATUS_TYPES exported from APIClient for available values.
