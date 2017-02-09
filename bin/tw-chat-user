@@ -1,4 +1,4 @@
-#!/usr/bin/env babel-node
+#!/usr/bin/env babel-node --
 import { padStart, intersection } from "lodash";
 import TeamworkChat from "../src/TeamworkChat";
 import { command, getUser } from "./lib/cli";

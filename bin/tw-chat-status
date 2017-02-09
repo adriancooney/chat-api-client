@@ -1,4 +1,4 @@
-#!/usr/bin/env babel-node
+#!/usr/bin/env babel-node --
 import Promise from "bluebird";
 import TeamworkChat from "..";
 import { STATUS_TYPES } from "../src/APIClient";
