@@ -1,7 +1,7 @@
 import Promise from "bluebird";
 import createDebug from "debug";
 import { inspect } from "util";
-import { omit, values, flatten, without, uniqBy, intersection } from "lodash";
+import { omit, values, flatten, without, uniqBy, intersection, range, last } from "lodash";
 import APIClient from "./APIClient";
 import Room from "./Room";
 import Person from "./Person";
@@ -423,26 +423,28 @@ export default class TeamworkChat extends Person {
             // update that direct room (attaches as Person.room).
             const conversations = res.conversations.map(this.saveRoom.bind(this));
 
-            // Assign the return page details (limit, offset) to the returned array to
+            // Assign the return page details (limit, offset, total) to the returned array to
             // describe what results are returned.
             return Object.assign(conversations, res.meta.page);
         });
     }
 
     /**
-     * Get all the rooms from the API and save in memory.
+     * Get all the rooms from the API and save in memory. WARNING: This makes a lot of API 
+     * calls if there is a lot of rooms so use sparingly. It is intentionally slow.
      * 
      * @return {Promise<Room[]>} The list of rooms.
      */
     getAllRooms() {
         return this.getRooms().then(rooms => {
-            const limit = rooms.total - rooms.limit;
+            const { limit, total } = rooms;
+            const pages = range(limit, total, limit);
 
-            if(limit > 0) {
-                return this.getRooms(rooms.limit, limit).then(rest => rooms.concat(rest));
-            } else {
-                return rooms;
-            }
+            return Promise.mapSeries(pages, offset => {
+                return this.getRooms(offset, limit).delay(1000);
+            }).then(rest => {
+                return rooms.concat(flatten(rest));
+            })
         });
     }
 

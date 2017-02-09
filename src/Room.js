@@ -97,8 +97,6 @@ export default class Room extends EventEmitter {
      * @return {Room}           The updated room object.
      */
     update(details) {
-        debug("updating room", this.toJSON(), details);
-
         const timestamps = ["lastActivityAt", "lastViewedAt", "updatedAt", "createdAt"];
 
         // Convert timestamps to moments

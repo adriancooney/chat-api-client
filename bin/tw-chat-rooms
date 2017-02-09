@@ -1,28 +1,61 @@
-#!/usr/bin/env babel-node
-import { padStart, sortBy } from "lodash";
+#!/usr/bin/env babel-node --
+import { padStart, sortBy, intersection, difference } from "lodash";
 import TeamworkChat from "..";
 import { command, getUser } from "./lib/cli";
+
+const MAX_COUNT = 10;
 
 command(program => {
     program
         .description("list rooms")
+        .option("-p, --page <num>", "the page number", parseInt)
+        .option("--offset <num>", "the rooms cursor offset", parseInt)
+        .option("--count <num>", "the rooms count after cursor offset", parseInt)
+        .option("-i, --includes <handles>", "list rooms the include all specified handles", parseHandles)
+        .option("-o, --only <handles>", "list rooms that only specified handles", parseHandles)
+        .option("--json", "output in json")
         .parse(process.argv);
 
+    const count = Math.min(program.count || MAX_COUNT, MAX_COUNT);
+    const offset = program.offset || ((program.page || 1) - 1) * count;
+
     return TeamworkChat.withCredentials(...getUser(), chat => {
-        return chat.getAllRooms().then(rooms => {
-            sortBy(rooms, "title").forEach(room => {
-                let title = room.title;
+        return chat.getRooms(offset, count).then(rooms => {
+            rooms = sortBy(rooms, "title");
 
-                if(!title) {
-                    title = room.people.slice(0, 5).map(person => `@${person.handle}`).join(", ");
+            if(program.includes) {
+                rooms = rooms.filter(rooms => {
+                    return intersection(rooms.people.map(person => person.handle), program.includes).length === program.includes.length;
+                });
+            }
 
-                    if(room.people.length > 5) {
-                        title += ` and ${room.people.length - 5} others`;
+            if(program.only) {
+                rooms = rooms.filter(room => {
+                    return room.people.length === program.only.length && difference(room.people.map(person => person.handle), program.only).length === 0;
+                });
+            }
+
+            rooms.forEach(room => {
+                if(program.json) {
+                    console.log(JSON.stringify(room));
+                } else {
+                    let title = room.title;
+
+                    if(!title) {
+                        title = room.people.slice(0, 5).map(person => `@${person.handle}`).join(", ");
+
+                        if(room.people.length > 5) {
+                            title += ` and ${room.people.length - 5} others`;
+                        }
                     }
-                }
 
-                console.log(padStart(`[${room.id}]`, 8) + ` ${title}`);
+                    console.log(padStart(`[${room.id}]`, 8) + ` ${title}`);
+                }
             });
         });
     });
 });
+
+function parseHandles(handles) {
+    return handles.split(",");
+}

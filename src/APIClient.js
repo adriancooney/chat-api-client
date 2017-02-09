@@ -616,7 +616,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} limit       The number of conversations after the cursor to get.
      * @return {Promise<Array>}     The list of conversations. See Teamwork API Docs.
      */
-    getRooms(offset = 0, limit = 15) {
+    getRooms(offset = 0, limit = 10) {
         return this.requestList(`/chat/v2/conversations.json?includeMessageData=true&includeUserData=true` +
             `&sort=lastActivityAt`, { offset, limit });
     }
