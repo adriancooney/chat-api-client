@@ -54,7 +54,8 @@ export const STATUS_TYPES = ["idle", "active"];
 /**
  * The global nonce counter. Scoped to this APIClient module only so
  * nobody outside can fiddle with it.
- * 
+ *
+ * @private
  * @type {Number}
  */
 let NONCE = 0;

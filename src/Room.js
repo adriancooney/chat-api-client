@@ -7,13 +7,76 @@ import Message from "./Message";
 
 const debug = createDebug("tw-chat:room");
 
+/**
+ * The Room model.
+ *
+ * Events:
+ *
+ *      "update": ({Room} changes, {Object} changes)
+ *
+ *          Emitted when the room is updated.
+ *
+ *      "person:new": ({Person} person)
+ *
+ *          Emitted when a new person is added to the room.
+ *
+ *      "person:update": ({Person} person, {Object} changes)
+ *
+ *          Emitted when a person in the room changes.
+ *
+ *      "message": ({Message} message)
+ *
+ *          Emitted when the room receives a new message.
+ *          
+ */
 export default class Room extends EventEmitter {
+    /** @type {Number} The room ID. */
+    id;
+
+    /** @type {String} The room type e.g. "pair", "private" */
+    type;
+
+    /** @type {String} The room title. */
+    title;    
+
+    /** @type {String} Room status e.g. "active" */
+    status;
+
+    /** @type {Number} The total number of unread message. */
+    unreadCount;
+
+    /** @type {Number} The number of important unread messages. */
+    importantUnreadCount;
+
+    /** @type {moment} The timestamp of the last activity in the room. */
+    lastActivityAt;
+
+    /** @type {moment} The timestamp the room was last viewed. */
+    lastViewedAt;
+
+    /** @type {moment} The timestamp the room was last update (?) */
+    updatedAt;
+
+    /** @type {moment} The timestamp of when the room was created. */
+    createdAt;
+
+    /** @type {Number} The ID of the person who created the room. */
+    creatorId;
+
     /** @type {Array} The messages store for this room. */
     messages = [];
 
     /** @type {Array} The people in the room. */
     people = [];
 
+    /**
+     * Create a new Room.
+     * 
+     * @param  {APIClient}  api          Authorized APIClient instance.
+     * @param  {Object}     details      Optional, room details from API.
+     * @param  {Person[]}   participants Optional, list of room particpants.
+     * @return {Room}              
+     */
     constructor(api, details, participants) {
         super();
         
@@ -26,25 +89,35 @@ export default class Room extends EventEmitter {
             this.addPeople(participants);
     }
 
+    /**
+     * Update the room object.
+     * 
+     * @param  {Object} details The details to update (usually API response).
+     * @return {Room}           The updated room object.
+     */
     update(details) {
         debug("updating room", this.toJSON(), details);
         let room = Object.assign(this, details);
-        this.emit("update", room);
+        this.emit("update", room, details);
         return room;
     }
 
-    findPeople() {
-        return this.people;
-    }
-
+    /**
+     * Find a person in memory by ID.
+     * 
+     * @param  {Number} id The person's ID.
+     * @return {Person} 
+     */
     findPersonById(id) {
         return this.people.find(person => person.id === id);
     }
 
-    getPersonByHandle(handle) {
-        return Promise.resolve(this.people.find(person => person.handle === handle));
-    }
-
+    /**
+     * Add a new person to the room.
+     * 
+     * @param  {Person} person  The person to add.
+     * @return {Person}         The added person.
+     */
     addPerson(person) {
         person.on("update", this.emit.bind(this, "person:update"));
         this.emit("person:new", person);
@@ -52,20 +125,41 @@ export default class Room extends EventEmitter {
         return person;
     }
 
+    /**
+     * Add multiple person objects to a room.
+     * 
+     * @param  {Person[]} people  Array of person objects.
+     * @return {Person[]}         The added person objects.
+     */
     addPeople(people) {
-        return people.forEach(this.addPerson.bind(this));
+        return people.map(this.addPerson.bind(this));
     }
 
+    /**
+     * Event Handler: When a new message is sent to the room.
+     * 
+     * @param  {Message} message The new message object.
+     */
     handleMessage(message) {
         return this.saveMessage(message);
     }
 
+    /**
+     * Add a new message to the room.
+     * @param  {Message} message  The new message.
+     * @return {Message}          The newly added message.
+     */
     addMessage(message) {
         this.messages.push(message);
         this.emit("message", message);
         return message;
     }
 
+    /**
+     * Get and save messages for a room.
+     * 
+     * @return {Promise<Message[]>} The message objects from the API.
+     */
     getMessages() {
         if(!this.initialized)
             return Promise.reject(new Error("Unable to get messages for uninitialized room."));
@@ -75,6 +169,12 @@ export default class Room extends EventEmitter {
         });
     }
 
+    /**
+     * Save or create a message to the room.
+     * 
+     * @param  {Object} rawMessage The raw message returned from the API.
+     * @return {Message}           The newly created (or saved) message object.
+     */
     saveMessage(rawMessage) {
         const message = this.findMessageById(rawMessage.id);
         const author = this.findPersonById(rawMessage.userId);
@@ -90,6 +190,12 @@ export default class Room extends EventEmitter {
         }
     }
 
+    /**
+     * Find a message in memory by ID.
+     * 
+     * @param  {Number} id  The message ID.
+     * @return {Message}    The found message object.
+     */
     findMessageById(id) {
         return this.messages.find(message => message.id === id);
     }
@@ -130,30 +236,49 @@ export default class Room extends EventEmitter {
         }
     }
 
+    /**
+     * Tell the server the currently logged in user is active in this room.
+     * 
+     * @return {Promse} Resolves once the frame is sent (there is no ack/fire and forget).
+     */
     activate() {
         return this.api.activateRoom(this.id);
     }
 
-    typing(status = true) {
-        return this.api.typing(status, this.id);
+    /**
+     * Send the `typing` event as the currently logged in user to the current room.
+     * 
+     * @param  {Boolean} isTyping  Whether or not the user is typing.
+     * @return {Promise}           Resolves when the frame is sent (again, no ack of the frame).
+     */
+    typing(isTyping = true) {
+        return this.api.typing(isTyping, this.id);
     }
 
+    /**
+     * Determine whether the current room instance has been initialized. "Initialized" simply
+     * means has the room an ID or not.
+     * 
+     * @return {Boolean}
+     */
     get initialized() {
         return !!this.id;
     }
 
-    get isDirectConversation() {
-        return size(this.people) === 2 && this.people.includes(this.api);
-    }
-
-    get peopleCount() {
-        return size(this.people);
-    }
-
+    /**
+     * Convert the room object to useful debuggable object (`util.inspect`).
+     * 
+     * @return {String}
+     */
     inspect() {
         return `Room{id = ${this.id}, [ ${this.people.map(person => `@${person.handle}`).join(", ")} ], messageCount = ${this.messages.length}}`;
     }
 
+    /**
+     * Serialize the room object.
+     * 
+     * @return {Object}
+     */
     toJSON() {
         return {
             people: this.people,
