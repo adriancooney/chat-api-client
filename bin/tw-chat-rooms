@@ -14,11 +14,10 @@ command(program => {
                 let title = room.title;
 
                 if(!title) {
-                    const people = room.findPeople();
-                    title = people.slice(0, 5).map(person => `@${person.handle}`).join(", ");
+                    title = room.people.slice(0, 5).map(person => `@${person.handle}`).join(", ");
 
-                    if(people.length > 5) {
-                        title += ` and ${people.length - 5} others`;
+                    if(room.people.length > 5) {
+                        title += ` and ${room.people.length - 5} others`;
                     }
                 }
 
