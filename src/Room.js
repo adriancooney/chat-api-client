@@ -1,5 +1,6 @@
 import { inspect } from "util";
 import Promise from "bluebird";
+import moment from "moment";
 import createDebug from "debug";
 import { values, size, omit, last } from "lodash";
 import EventEmitter from "./lib/EventEmitter";
@@ -97,7 +98,18 @@ export default class Room extends EventEmitter {
      */
     update(details) {
         debug("updating room", this.toJSON(), details);
-        let room = Object.assign(this, details);
+
+        const timestamps = ["lastActivityAt", "lastViewedAt", "updatedAt", "createdAt"];
+
+        // Convert timestamps to moments
+        let room = Object.assign(this, omit(details, ...timestamps), timestamps.reduce((up, ts) => {
+            if(details[ts]) {
+                up[ts] = moment(details[ts]);
+            }
+            
+            return up;
+        }, {}));
+
         this.emit("update", room, details);
         return room;
     }
