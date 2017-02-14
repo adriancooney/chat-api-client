@@ -1,6 +1,6 @@
 import assert from "assert";
 import APIClient from "../src/APIClient";
-import { INSTALLATION, USERNAME, PASSWORD, localAPIClient } from "./";
+import { INSTALLATION, USERNAME, PASSWORD, localAPIClient } from "./fixture";
 
 describe("APIClient", () => {
     describe("static methods", () => {

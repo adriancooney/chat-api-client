@@ -1,26 +1,19 @@
 import assert from "assert";
 import Promise from "bluebird";
-import sinon from "sinon";
-import { createFrame, createMessageFrame, createRoom, devTeamworkChat, localTeamworkChat } from "./";
+import { 
+    createFrame, 
+    createMessageFrame, 
+    createRoom, 
+    createPerson,
+    expectRequest,
+    devTeamworkChat, 
+    localTeamworkChat 
+} from "./fixture";
 import TeamworkChat, {
     APIClient, Person, Room, Message
 } from "..";
 
 describe("TeamworkChat", function() {
-    // this.timeout(0);
-    describe("static methods", () => {
-        describe(".withCredentials", () => {
-            it("should create a new TeamworkChat correctly", async () => {
-                let chat = await localTeamworkChat();
-                // // let rooms = await chat.getRooms();
-                // let peter = await chat.getPersonByHandle("peter");
-                // await peter.sendMessage("howya lad");
-                
-                let newRoom = await chat.getRoomForHandles(["peter", "testUser2"])
-            });
-        });
-    });
-
     describe("instance methods", () => {
         let chat;
         beforeEach(async () => {
@@ -96,24 +89,6 @@ describe("TeamworkChat", function() {
                     done();
                 });
             });
-
-            it("should send a message to a locally, non-existing room", done => {
-                const stub = sinon.stub(APIClient, "request", (url, options) => {
-                    const roomId = url.match(/rooms\/(\d+)\.json/)[1];
-                    return Promise.resolve({ 
-                        room: createRoom({
-                            id: parseInt(roomId)
-                        }) 
-                    });
-                });
-
-                chat.on("error", done);
-                setInterval(() => {
-                    chat.api.emit("frame", createMessageFrame({
-                        id: Math.floor(Math.random())
-                    }));
-                }, 3000);
-            });
         });
 
         describe("chat event: user.modified", () => {
@@ -134,6 +109,32 @@ describe("TeamworkChat", function() {
                 });
             });
         });
+
+        describe("chat event: user.updated", () => {
+            it.only("should directly query the API when a user is updated", done => {
+                chat.on("error", done);
+
+                let restore = expectRequest(/\/people.json/, { people: [createPerson()] });
+
+                chat.getPersonByHandle("developers").then(peter => {
+                    restore();
+
+                    restore = expectRequest(/people\/(\d+)\.json/, $1 => ({
+                        person: createPerson({ id: parseInt($1) })
+                    }));
+
+                    chat.api.emit("frame", createFrame("user.updated", {
+                        id: peter.id
+                    }));
+
+                    chat.on("person:update", person => {
+                        assert.equal(person.id, peter.id);
+                        restore();
+                        done();
+                    });
+                });
+            });
+        });
     });
 
     describe("flows", () => {
@@ -143,7 +144,7 @@ describe("TeamworkChat", function() {
         });
 
         describe("get people by handle and send message", () => {
-            it.only("should send a private message when you only want one user", async () => {
+            it("should send a private message when you only want one user", async () => {
                 const peter = await chat.getPersonByHandle("peter");
                 // const room = await chat.getRoomForHandles(["peter"]);
                 console.log(peter.roomId);

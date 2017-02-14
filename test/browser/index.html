@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Mocha</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="lib/mocha.css" />
+  </head>
+  <body>
+    <div id="mocha"></div>
+    <script src="lib/mocha.js"></script>
+    <script>mocha.setup("bdd");</script>
+    <script src="dist/index.js" onerror="alert('Tests file does not exist. Please run `yarn run browser:tests` to build the test files.')"></script>
+    <script>
+      mocha.run();
+    </script>
+  </body>
+</html>

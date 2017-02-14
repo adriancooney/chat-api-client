@@ -1,6 +1,6 @@
 import assert from "assert";
 import Promise from "bluebird";
-import { devTeamworkChat } from "./";
+import { devTeamworkChat } from "./fixture";
 import TeamworkChat, {
     APIClient, Person, Room, Message
 } from "..";
