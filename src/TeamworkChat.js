@@ -41,7 +41,7 @@ const RECONNECT_INTERVAL = 1000 * 3;
  *
  *      "message": ({Room} room, {Message} message)
  *
- *          When a room receives a message.
+ *          When a room receives a message (i.e. emitted for ALL messages the current user can see)
  *
  *      "room:new": ({Room} room)
  *
@@ -83,9 +83,18 @@ export default class TeamworkChat extends Person {
      * We therefore can't store them in an object by ID because we would have a bunch of
      * `undefined` keys.
      *
-     * @type {Array}
+     * @type {Room[]}
      */
     rooms = [];
+
+    /**
+     * The people currently loaded in TeamworkChat.
+     * 
+     * @return {Person[]}
+     */
+    get people() {
+        return this.room.people;
+    }
 
     /**
      * Create a new TeamworkChat instance.
@@ -171,10 +180,30 @@ export default class TeamworkChat extends Person {
                     const person = this.findPersonById(update.userId)
 
                     if(person) {
-                        person.update({ [update.key]: update.value });
+                        return person.update({ [update.key]: update.value });
                     } else {
                         debug(`Warning: user with ID ${update.userId} not loaded in memory, discarding frame.`);
                     }
+                break;
+
+                case "room.updated":
+                    // The act of getting the room from the API automatically saves the
+                    // room to memory (or updates the existing room).
+                    return this.getRoom(frame.contents.id, false).then(room => {
+                        debug(`${frame.contents.id} room has been updated`);
+                    });
+                break;
+
+                case "user.updated":
+                    // As with `room.updated`, getting them from the API updates the user.
+                    return this.getPerson(frame.contents.id, false).then(room => {
+                        debug(`${frame.contents.id} person has been updated`);
+                    });
+                break;
+
+                case "unseen.counts.update":
+                    debug("'unseen.counts.update' frame received but discarded, we don't store this information. " +
+                        "Use `getUnseenCount` to get counts.");
                 break;
 
                 default:
@@ -348,6 +377,15 @@ export default class TeamworkChat extends Person {
     }
 
     /**
+     * Add multiple rooms.
+     * 
+     * @param {Room[]} rooms
+     */
+    addRooms(rooms) {
+        return rooms.map(room => this.addRoom(room));
+    }
+
+    /**
      * Save the room data from the API response to the appropriate room or create a new
      * room and add it if it does not exist.
      * 
@@ -381,13 +419,14 @@ export default class TeamworkChat extends Person {
      * Get a room by ID. This attempts to find it in memory, if it does not exist,
      * it is loaded from the server and saved.
      * 
-     * @param  {Number} id        The room ID.
-     * @return {Promise<Room>}    Resolves to the requested room.
+     * @param  {Number}     id          The room ID.
+     * @param  {Boolean}    cached      Optional, pick from the cache if room exists (default: true).
+     * @return {Promise<Room>}          Resolves to the requested room.
      */
-    getRoom(id) {
+    getRoom(id, cached = true) {
         const room = this.findRoomById(id);
 
-        if(!room) {
+        if(!room || !cached) {
             return this.api.getRoom(id).then(({ room }) => this.saveRoom(room));
         } else return Promise.resolve(room);
     }
@@ -459,6 +498,21 @@ export default class TeamworkChat extends Person {
     }
 
     /**
+     * Get a person by ID and save them.
+     * 
+     * @param  {Number}  id     The person's ID.
+     * @param  {Boolean} cached Whether or not to search cache first.
+     * @return {Promise<Person>}
+     */
+    getPerson(id, cached = true) {
+        const person = this.findPersonById(id);
+
+        if(!person || !cached) {
+            return this.api.getPerson(id).then(({ person }) => this.savePerson(person));
+        } else return Promise.resolve(person);
+    }
+
+    /**
      * Find a person by a specific property. WARNING: If the person is not found in memory, 
      * `getAllPeople` is called and ALL PEOPLE are loaded from the API. The requested user is
      * then plucked from the returned values.
@@ -501,16 +555,6 @@ export default class TeamworkChat extends Person {
      */
     getPersonByHandle(handle) {
         return this.getPersonBy("handle", handle);
-    }
-
-    /**
-     * Get a person by ID and save them.
-     * 
-     * @param  {Number} id  The person's ID.
-     * @return {Promise<Person>}
-     */
-    getPersonById(id) {
-        return this.getPersonBy("id", id);
     }
 
     /**
@@ -569,9 +613,29 @@ export default class TeamworkChat extends Person {
     }
 
     /**
-     * Close the connection to Teamwork Chat servers and logout.
+     * Override parent method and remove `api` key from details. This can
+     * happen is we happen to serialize this person (i.e. TeamworkChat) and
+     * then attempt to `addPerson`, it would override our API instance.
      * 
-     * @return {Promise} Resolves when logout is complete.
+     * @override
+     */
+    update(details) {
+        return super.update(omit(details, "api"));
+    }
+
+    /**
+     * Logout the from the API and close the connection.
+     * 
+     * @return {Promise} Resolves once logged out.
+     */
+    logout() {
+        this.close();
+
+        return this.api.logout();
+    }
+
+    /**
+     * Close the connection to Teamwork Chat servers and logout.
      */
     close() {
         // Don't attempt to close the socket a second time
@@ -580,9 +644,6 @@ export default class TeamworkChat extends Person {
 
         this.forceClosed = true;
         this.api.close();
-
-        debug("logging out");
-        return this.api.logout();
     }
 
     /**
@@ -630,10 +691,10 @@ export default class TeamworkChat extends Person {
      * done. Otherwise, you can use `withCredentials` to automatically clean up and 
      * log the user out when complete (recommended). See TeamworkChat.withCredentials.
      * 
-     * @param  {String}   installation  The fully qualified installation URL.
-     * @param  {String}   username      The username used to login to Teamwork.
-     * @param  {String}   password      The password used to login to Teamwork (disposed after initial login request).
-     * @return {Promise<TeamworkChat>}  An authorized and fully connected TeamworkChat instance.
+     * @param  {String|Object}  installation  The installation URL.
+     * @param  {String}         username      The username used to login to Teamwork.
+     * @param  {String}         password      The password used to login to Teamwork (disposed after initial login request).
+     * @return {Promise<TeamworkChat>}        An authorized and fully connected TeamworkChat instance.
      */
     static fromCredentials(installation, username, password) {
         debug(`logging in with user ${username} to ${installation}.`);
@@ -650,16 +711,44 @@ export default class TeamworkChat extends Person {
      * closed. This allows the process to exit appropriately and ensures any open sockets are closed.
      * This will also *log the user out* when complete rendering the `tw-auth` token is useless.
      * 
-     * @param  {String}   installation The fully qualified installation URL.
-     * @param  {String}   username     The username used to login to Teamwork.
-     * @param  {String}   password     The password used to login to Teamwork (disposed after initial login request).
-     * @param  {Function} callback     The callback (!) that has param `chat` TeamworkChat instance. This returns
-     *                                 a promise that when complete, closes the connection to Teamwork.
-     * @return {Promise}               Resolves to nothing but ensures connection to Teamwork is closed fully.
+     * @param  {String|Object}  installation The installation URL.
+     * @param  {String}         username     The username used to login to Teamwork.
+     * @param  {String}         password     The password used to login to Teamwork (disposed after initial login request).
+     * @param  {Function}       callback     The callback (!) that has param `chat` TeamworkChat instance. This returns
+     *                                       a promise that when complete, closes the connection to Teamwork.
+     * @return {Promise}                     Resolves to nothing but ensures connection to Teamwork is closed fully.
      */
     static withCredentials(installation, username, password, callback) {
         return Promise.using(TeamworkChat.fromCredentials(installation, username, password).disposer(chat => {
-            return chat.close();
+            return chat.logout();
+        }), callback);
+    }
+
+    /**
+     * Similar to `TeamworkChat.fromCredentials` except using a pre-existing auth key.
+     * 
+     * @param  {String|Object}  installation The installation URL.
+     * @param  {String}         auth         The user's auth key.
+     * @return {Promise<TeamworkChat>}       An authorized and fully connected TeamworkChat instance.
+     */
+    static fromAuth(installation, auth) {
+        return APIClient.loginWithAuth(installation, auth).then(api => {
+            return new TeamworkChat(api, api.user);
+        });
+    }
+
+    /**
+     * The very same functionality as `TeamworkChat.withCredentials` except using an auth key.
+     * 
+     * @param  {String|Object}  installation The installation URL.
+     * @param  {String}         auth         The user's auth key.
+     * @param  {Function}       callback     The callback (!) that has param `chat` TeamworkChat instance. This returns
+     *                                       a promise that when complete, closes the connection to Teamwork.
+     * @return {Promise<TeamworkChat>}       An authorized and fully connected TeamworkChat instance.
+     */
+    static withAuth(installation, auth, callback) {
+        return Promise.using(TeamworkChat.fromAuth(installation, auth).disposer(chat => {
+            return chat.logout();
         }), callback);
     }
 }

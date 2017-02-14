@@ -3,7 +3,7 @@ import { inspect } from "util";
 import { EventEmitter } from "events";
 import createDebug from "debug";
 import WebSocket from "ws";
-import fetch from "isomorphic-fetch";
+import fetch from "fetch";
 import Promise, { CancellationError, TimeoutError } from "bluebird";
 import { green, blue } from "colors";
 import { without, omit, isEqual } from "lodash";
@@ -659,6 +659,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * POST <installation>/launchpad/v1/login.json - Login to Teamwork with credentials.
+     * 
      * @param  {String}  installation   The user's installation hostname.
      * @param  {String}  username       The user's username.
      * @param  {String}  password       The user's password.
@@ -679,24 +680,16 @@ export default class APIClient extends EventEmitter {
     /**
      * Login and connect to the chat server.
      * 
-     * @param  {String|Object}  installation The user's installation hostname.
+     * @param  {String|Object}  installation The user's installation.
      * @param  {String}         username     The user's username.
      * @param  {String}         password     The user's password.
      * @return {Promise<APIClient>}          Resolves to a new instance of APIClient that can make authenticated requests
      *                                       as the user. The user's details can be access at `APIClient.user`.
      */
     static loginWithCredentials(installation, username, password) {
-        if(typeof installation === "object") {
-            installation = url.format({
-                protocol: "http:",
-                ...installation
-            });
-        }
+        installation = APIClient.normalizeInstallation(installation);
 
-        // Remove any trailing slash
-        installation = installation.replace(/\/$/, "");
-
-        debug(`attempting to login with ${username} at ${installation}.`);
+        debug(`attempting to login with ${username} to ${installation}.`);
         return APIClient.login(installation, username, password).then(res => {
             if(res.ok) {
                 // Extract the tw-auth cookie from the responses
@@ -705,18 +698,36 @@ export default class APIClient extends EventEmitter {
                 const twAuth = twAuthCookie.split("=")[1];
                 debug(`Successfully logged in: tw-auth=${twAuth}`);
 
-                return new APIClient(installation, twAuth);
+                const api =  new APIClient(installation, twAuth);
+
+                return api.connect();
             } else {
                 debug(`login failed: ${res.status}`);
                 throw new Error(`Invalid login credentials for ${username}@${installation}.`);
             }
-        }).then(api => {
-            return api.connect();
         });
     }
 
     /**
+     * Login with a pre-existing auth key.
+     * 
+     * @param  {String|Object}  installation  The user's installation.
+     * @param  {String}         auth          The user's auth key (this will fail if the auth key is invalid or expired).
+     * @return {Promise<APIClient>}           Resolves to a new instance of APIClient that can make authenticated requests
+     *                                        as the user. The user's details can be access at `APIClient.user`.
+     */
+    static loginWithAuth(installation, auth) {
+        installation = APIClient.normalizeInstallation(installation);
+
+        debug(`attempting to loging with auth key "${auth}" to ${installation}`);
+        const api = new APIClient(installation, auth);
+
+        return api.connect();
+    }
+
+    /**
      * Create a frame to send to the socket server.
+     * 
      * @param  {String}     type     The frame type or identifier.
      * @param  {Any}        contents The contents of the frame.
      * @param  {Boolean}    nonced   Whether or not to nonce the frame.
@@ -774,6 +785,24 @@ export default class APIClient extends EventEmitter {
         }
 
         return matches.every(match => match);
+    }
+
+    /**
+     * Conver an installation input (object or string) to a string.
+     * 
+     * @param  {Object|String} installation The installation descriptor.
+     * @return {String}                     The installation URL.
+     */
+    static normalizeInstallation(installation) {
+        if(typeof installation === "object") {
+            installation = url.format({
+                protocol: "http:",
+                ...installation
+            });
+        }
+
+        // Remove any trailing slash
+        return installation.replace(/\/$/, "");
     }
 
     /**

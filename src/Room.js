@@ -104,7 +104,7 @@ export default class Room extends EventEmitter {
             if(details[ts]) {
                 up[ts] = moment(details[ts]);
             }
-            
+
             return up;
         }, {}));
 
@@ -156,6 +156,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Add a new message to the room.
+     * 
      * @param  {Message} message  The new message.
      * @return {Message}          The newly added message.
      */

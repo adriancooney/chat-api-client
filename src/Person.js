@@ -141,7 +141,7 @@ export default class Person extends EventEmitter {
         this.emit("update", person, update);
 
         // If we have a roomId, add it to the pair room
-        if(details.roomId) {
+        if(details.roomId && !this.room.initialized) {
             this.room.update({ id: details.roomId });
         }
 
