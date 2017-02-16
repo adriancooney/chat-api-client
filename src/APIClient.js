@@ -3,7 +3,7 @@ import { inspect } from "util";
 import { EventEmitter } from "events";
 import createDebug from "debug";
 import WebSocket from "ws";
-import fetch from "fetch";
+import fetch from "node-fetch";
 import Promise, { CancellationError, TimeoutError } from "bluebird";
 import { green, blue } from "colors";
 import { without, omit, isEqual } from "lodash";
