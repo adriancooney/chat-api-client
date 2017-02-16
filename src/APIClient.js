@@ -288,6 +288,9 @@ export default class APIClient extends EventEmitter {
                         resolve(this);
 
                         this.emit("connected");
+
+                        // Silence "created promised without returning" errors
+                        return null;
                     }).catch(reject);
                 });
             });
@@ -320,10 +323,15 @@ export default class APIClient extends EventEmitter {
                     debug(`third ping attempt failed, assuming socket connection is broken. Closing.`);
                     reject(err);
                 }
+
+                // Silence the "you created a promise and didn't return it" warning
+                return null;
             }).catch(err => this.emit.bind(this, "error"));
         }).then(() => {
             debug("ping succeeded");
             this.nextPing();
+
+            return null; // Again, silencing the errors like above
         }).catch(CancellationError, () => {
             debug("ping stopped");
         }).catch(TimeoutError, () => {
