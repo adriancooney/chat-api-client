@@ -43,10 +43,15 @@ const RECONNECT_INTERVAL = 1000 * 3;
  *
  *          When a room receives a message (i.e. emitted for ALL messages the current user can see)
  *
- *      "message:direct": ({Person} person, {Message} message)
+ *      "message:direct": ({Message} message)
  *
  *          When the currently logged in user recieves a direct message. The first parameter is
- *          the user that send the message.
+ *          the user that send the message. To get the author of the message, use `message.author` ({Person}).
+ *
+ *      "message:mention": ({Room} room, {Message} message)
+ *
+ *          When the currently logged in user is mentioned in a room. To get the author of the
+ *          message, use `message.author` ({Person}).
  *
  *      "room:new": ({Room} room)
  *
@@ -371,6 +376,7 @@ export default class TeamworkChat extends Person {
     addRoom(room) {
         // Listen to updates on the room object and proxy them through this instance
         room.on("message", this.emit.bind(this, "message", room));
+        room.on("message:mention", this.emit.bind(this, "message:mention", room));
         room.on("update", this.emit.bind(this, "room:update"));
 
         // Emit the new room event

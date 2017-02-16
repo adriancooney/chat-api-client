@@ -86,10 +86,10 @@ export default class Person extends EventEmitter {
             this.room = new Room(api);
             this.room.addPerson(api.user);
             this.room.addPerson(this);
-        }
 
-        // Proxy the message listener
-        this.room.on("message", this.onMessage.bind(this));
+            // Proxy the message listener
+            this.room.on("message", this.onMessage.bind(this));
+        }
 
         if(details) {
             this.update(details);
@@ -144,6 +144,19 @@ export default class Person extends EventEmitter {
         }
 
         return person;
+    }
+
+    /**
+     * Determine if a user has been mentioned in a message.
+     * @param  {String}  message The message content.
+     * @return {Boolean}
+     */
+    isMentioned(message) {
+        if(!this.handlerMatcher) {
+            this.handlerMatcher = new RegExp(`@${this.handle}`, "g");
+        }
+
+        return this.handlerMatcher.test(message);
     }
 
     /**

@@ -163,6 +163,12 @@ export default class Room extends EventEmitter {
     addMessage(message) {
         this.messages.push(message);
         this.emit("message", message);
+
+        // Handle mentions
+        if(this.api.user.isMentioned(message.content)) {
+            this.emit("message:mention", message);
+        }
+
         return message;
     }
 
