@@ -428,6 +428,32 @@ export default class TeamworkChat extends Person {
     }
 
     /**
+     * Find a room by ID locally.
+     * 
+     * @param  {Number} id The room's id.
+     * @return {Room}
+     */
+    findRoomById(id) {
+        return this.rooms.find(room => room.id === id);
+    }
+
+    /**
+     * Find a room in memory by title.
+     * 
+     * @param  {String|RegExp} title The exact title of the room or regex.
+     * @return {Room}                The room, if any.
+     */
+    findRoomByTitle(title) {
+        return this.rooms.find(room => {
+            if(title instanceof RegExp) {
+                return title.test(room.title);
+            } else {
+                return room.title === title;
+            }
+        });
+    }
+
+    /**
      * Get a room by ID. This attempts to find it in memory, if it does not exist,
      * it is loaded from the server and saved.
      * 
@@ -444,13 +470,21 @@ export default class TeamworkChat extends Person {
     }
 
     /**
-     * Find a room by ID locally.
+     * Get a room by it's title.
      * 
-     * @param  {Number} id The room's id.
-     * @return {Room}
+     * @param  {String|RegExp} title The exact room title or a regex.
+     * @return {Room}                The room, if any.
      */
-    findRoomById(id) {
-        return this.rooms.find(room => room.id === id);
+    getRoomByTitle(title) {
+        const room = this.findRoomByTitle(title);
+
+        if(room) {
+            return Promise.resolve(room);
+        }
+
+        return this.getAllRooms().then(() => {
+            return this.findRoomByTitle(title);
+        });
     }
 
     /**
