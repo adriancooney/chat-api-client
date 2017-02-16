@@ -148,7 +148,7 @@ export default class TeamworkChat extends Person {
             debug(`socket reconnect failed, attempting to reconnect (attempt ${attempt})`);
         }
 
-        return this.api.connect().then(() => {
+        return this.connect().then(() => {
             debug("socket reconnected");
             this.emit("reconnect");
         }).catch(error => {
@@ -659,6 +659,22 @@ export default class TeamworkChat extends Person {
 
         this.forceClosed = true;
         this.api.close();
+    }
+
+    /**
+     * Connect or reconnect a closed socket (i.e. after calling `.close`).
+     * 
+     * @return {[type]} [description]
+     */
+    connect() {
+        this.forceClosed = false;
+
+        if(this.api.connected)
+            return Promise.resolve(this.api);
+
+        return this.api.connect().then(api => {
+            api.user = this.update(api.user);
+        });
     }
 
     /**
