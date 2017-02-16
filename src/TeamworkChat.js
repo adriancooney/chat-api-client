@@ -43,6 +43,11 @@ const RECONNECT_INTERVAL = 1000 * 3;
  *
  *          When a room receives a message (i.e. emitted for ALL messages the current user can see)
  *
+ *      "message:direct": ({Person} person, {Message} message)
+ *
+ *          When the currently logged in user recieves a direct message. The first parameter is
+ *          the user that send the message.
+ *
  *      "room:new": ({Room} room)
  *
  *          When a new room is added. Again does does NOT MEAN a new room was created on the
@@ -600,6 +605,9 @@ export default class TeamworkChat extends Person {
      * @param {Person} person
      */
     addPerson(person) {
+        // Proxy any received messages to the `message:direct` event
+        person.on("message:received", this.emit.bind(this, "message:direct", person));
+
         return this.room.addPerson(person);
     }
 
