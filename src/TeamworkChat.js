@@ -111,6 +111,7 @@ export default class TeamworkChat extends Person {
         super(api, user);
 
         this.api.user = this;
+        this.room = new Room(api, { id: "root" });
         this.room.addPerson(this);
 
         this.api.on("frame", this.onFrame.bind(this));
@@ -172,7 +173,7 @@ export default class TeamworkChat extends Person {
                     }
 
                     return this.getRoom(message.roomId).then(room => {
-                        return room.handleMessage(message)
+                        return room.handleMessage(message);
                     });
                 break;
 

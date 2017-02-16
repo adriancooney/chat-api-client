@@ -86,8 +86,6 @@ export default class Person extends EventEmitter {
             this.room = new Room(api);
             this.room.addPerson(api.user);
             this.room.addPerson(this);
-        } else {
-            this.room = new Room(api, { id: "root" });
         }
 
         // Proxy the message listener
