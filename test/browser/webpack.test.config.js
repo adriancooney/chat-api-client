@@ -9,5 +9,13 @@ module.exports = merge({}, defaultConfig, {
     output: {
         path: path.join(__dirname, "dist"),
         filename: "index.js",
-    }
+    },
+
+    devtool: "source-map",
+    
+    plugins: [
+        new webpack.LoaderOptionsPlugin({
+            debug: true
+        })
+   ]
 });

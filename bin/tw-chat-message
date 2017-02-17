@@ -1,7 +1,6 @@
 #!/usr/bin/env babel-node
 import Promise from "bluebird";
-import TeamworkChat from "..";
-import { command, getUser } from "./lib/cli";
+import { command, getChat } from "./lib/cli";
 
 command(program => {
     program
@@ -14,7 +13,7 @@ command(program => {
     if(!program.message)
         throw new Error("Message flag not set.");
 
-    return TeamworkChat.withCredentials(...getUser(), chat => {
+    return getChat().then(chat => {
         return Promise.try(() => {
             if(program.room) {
                 return chat.getRoom(program.room);

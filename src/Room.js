@@ -247,7 +247,7 @@ export default class Room extends EventEmitter {
                 return this.getMessages();
             }).then(messages => last(messages));
         } else {
-            return this.api.sendMessage(this.id, message.content).then(message => { 
+            return this.api.sendMessage(this.id, message.content).then(message => {
                 return this.saveMessage(message);
             });
         }

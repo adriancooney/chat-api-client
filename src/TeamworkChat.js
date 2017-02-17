@@ -193,6 +193,7 @@ export default class TeamworkChat extends Person {
                     if(person) {
                         return person.update({ [update.key]: update.value });
                     } else {
+                        // TODO: Why do we discard here and `getPerson` in `user.update` event?
                         debug(`Warning: user with ID ${update.userId} not loaded in memory, discarding frame.`);
                     }
                 break;

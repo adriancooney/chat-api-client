@@ -27,12 +27,13 @@
   },
   "scripts": {
     "browser:build": "webpack -p",
-    "browser:tests": "webpack --debug --config test/browser/webpack.test.config.js",
+    "browser:test:build": "webpack --output-pathinfo --config test/browser/webpack.test.config.js",
+    "browser:test": "yarn run browser:test:build && open ./test/browser/index.html",
     "test": "mocha --compilers js:babel-register --require babel-polyfill"
   },
   "babel": {
     "presets": [
-      ["es2015", { "modules": false }],
+      "es2015",
       "es2016",
       "es2017",
       "stage-0"

@@ -17,7 +17,7 @@ const debug = createDebug("tw-chat:api");
  * 
  * @type {Number}
  */
-const PING_INTERVAL = 5000;
+const PING_INTERVAL = 10000;
 
 /**
  * The maximum amount of pings allowed fail before the socket is like "hang on,
@@ -60,6 +60,38 @@ export const STATUS_TYPES = ["idle", "active"];
  */
 let NONCE = 0;
 
+/**
+ * The (mostly) raw connector to the Teamwork Chat API. This intentionally DOES NOT
+ * transform the returned response from the API (aside from deserializing the JSON),
+ * that is left up to the TeamworkChat class. This class does not know about any
+ * Person, Message or Room objects and only accepts values.
+ *
+ * Events:
+ *
+ *      "connected":
+ *
+ *          Emitted when the client successfully connects to the API socket. This is
+ *          emitted after authentication was successful.
+ *          
+ *      "message": ({String} string)
+ *
+ *          Emitted when the client recieves a "message" from the server.
+ *      
+ *      "frame": ({Object} frame)
+ *
+ *          Emitted when the client recieves a "message" from the server and the contents
+ *          of the message is parsed.
+ *          
+ *      "close":
+ *
+ *          Emitted when the connection to the server closes.
+ *          
+ *      "error": ({Error} error)
+ *
+ *          Emitted when an error occurs within the API client (usually in the underlying
+ *          Websocket).
+ *          
+ */
 export default class APIClient extends EventEmitter {
     /** @type {Function} The implementation of the WebSocket class */
     static WebSocket = WebSocket;
@@ -119,7 +151,8 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object>}    Resolves the raw packet object sent down the line.
      */
     sendFrame(type, contents = {}) {
-        return this.send(APIClient.createFrame(type, contents));
+        const frame = APIClient.createFrame(type, contents);
+        return this.send(frame).return(frame);
     }
 
     /**
@@ -226,6 +259,8 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<APIClient>} Resolves when the server has successfully completed authentication.
      */
     connect() {
+        // Get the user's profile. If this fails, it means our token is invalid
+        // and the connection will fail.
         return this.getProfile().then(res => {
             // Save the logged in user's account to `user`;
             this.user = res.account;
@@ -259,6 +294,7 @@ export default class APIClient extends EventEmitter {
                 // and add the `onSocketError` handler instead when the authentication flow completes.
                 this.socket.on("error", reject);
 
+                // The authentication flow.
                 this.socket.on("open", () => {
                     // Wait for the authentication request frame and send back the auth frame.
                     this.awaitFrame("authentication.request").then(message => {
@@ -270,6 +306,7 @@ export default class APIClient extends EventEmitter {
                             clientVersion: pkg.version
                         });
                     }).then(() => {
+                        // Race the error or confirmation frames.
                         return this.raceFrames("authentication.error", "authentication.confirmation");
                     }).then(frame => {
                         if(frame.name === "authentication.error") {
@@ -790,6 +827,10 @@ export default class APIClient extends EventEmitter {
 
         if(filter.contents) {
             matches.push(isEqual(filter.contents, frame.contents));
+        }
+
+        if(!matches.length) {
+            throw new Error("No filters specified in `matchFrame`. If you want to match all frames, listen for `frame` event.");
         }
 
         return matches.every(match => match);

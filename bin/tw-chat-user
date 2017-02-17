@@ -1,7 +1,6 @@
 #!/usr/bin/env babel-node --
 import { padStart, intersection } from "lodash";
-import TeamworkChat from "../src/TeamworkChat";
-import { command, getUser } from "./lib/cli";
+import { command, getChat } from "./lib/cli";
 
 command((program, config) => {
     return new Promise((resolve, reject) => {
@@ -22,7 +21,7 @@ command((program, config) => {
             .arguments("[user]")
             .allowUnknownOption()
             .action(user => {
-                return TeamworkChat.withCredentials(...getUser(user), chat => {
+                return getChat(user).then(chat => {
                     console.log(user ? `User: ${user}` : `Default User: ${config.user}`);
                     console.log(chat.toJSON());
                 }).then(resolve, reject);

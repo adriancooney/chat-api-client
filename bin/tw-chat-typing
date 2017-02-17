@@ -1,6 +1,5 @@
 #!/usr/bin/env babel-node --
-import TeamworkChat from "..";
-import { command, getUser } from "./lib/cli";
+import { command, getChat } from "./lib/cli";
 
 command(program => {
     program
@@ -8,9 +7,9 @@ command(program => {
         .option("-r, --room <id>", "the room to type")
         .parse(process.argv);
 
-    return TeamworkChat.withCredentials(...getUser(), chat => {
-        return chat.getRoom(program.room).then(room => {
-            return room.typing();
-        });
+    return getChat().then(chat => {
+        return chat.getRoom(program.room);
+    }).then(room => {
+        return room.typing();
     });        
 });

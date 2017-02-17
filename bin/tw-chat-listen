@@ -1,7 +1,6 @@
 #!/usr/bin/env babel-node
 import { inspect } from "util";
-import TeamworkChat from "..";
-import { command, getUser } from "./lib/cli";
+import { command, getChat } from "./lib/cli";
 
 command(program => {
     program
@@ -9,8 +8,8 @@ command(program => {
         .option("--json", "output in json")
         .parse(process.argv);
 
-    return TeamworkChat.fromCredentials(...getUser()).then(chat => {
-        return chat.getRooms().then(rooms => {
+    return getChat().then(chat => {
+        return new Promise((resolve, reject) => {
             chat.on("*", (event, ...details) => {
                 if(event === "pong" && !program.includePings)
                     return;
@@ -25,6 +24,8 @@ command(program => {
                     console.log(`${new Date()} >>> "${event}": ${details.map(detail => inspect(detail)).join("\t")}`);
                 }
             });
+
+            chat.on("error", reject);
         });
     });
 });

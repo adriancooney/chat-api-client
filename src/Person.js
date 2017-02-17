@@ -104,7 +104,7 @@ export default class Person extends EventEmitter {
     onMessage(message) {
         this.emit("message", message);
 
-        const direction = this.message.userId === this.api.user.id ? "sent" : "received";
+        const direction = message.userId === this.api.user.id ? "sent" : "received";
         this.emit(`message:${direction}`, message);
     }
 

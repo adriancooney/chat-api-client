@@ -1,8 +1,7 @@
 #!/usr/bin/env babel-node --
 import Promise from "bluebird";
-import TeamworkChat from "..";
 import { STATUS_TYPES } from "../src/APIClient";
-import { command, getUser } from "./lib/cli";
+import { command, getChat } from "./lib/cli";
 
 command(program => {
     return new Promise((resolve, reject) => {
@@ -13,10 +12,10 @@ command(program => {
                 if(!status)
                     throw new Error(`Please supply a status. One of: ${STATUS_TYPES.join(",")}`);
 
-                TeamworkChat.withCredentials(...getUser(), chat => {
-                    return chat.updateStatus(status).then((...args) => {
-                        console.log(`Updated status to: ${status}`);
-                    });
+                getChat().then(chat => {
+                    return chat.updateStatus(status);
+                }).then((...args) => {
+                    console.log(`Updated status to: ${status}`);
                 }).then(resolve, reject);
             });
         
