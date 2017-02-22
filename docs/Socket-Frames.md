@@ -128,3 +128,61 @@ Updating typing status.
     }
 }
 ```
+
+### `user.added`
+When a user is added in projects.
+
+```json
+{
+    "validator": {},
+    "contentType": "object",
+    "name": "user.added",
+    "contents": {
+        "id": 125943
+    }
+}
+```
+
+### `user.deleted`
+When a user is deleted in projects.
+
+```json
+{
+    "validator": {},
+    "contentType": "object",
+    "name": "user.deleted",
+    "contents": {
+        "id": 125943,
+        "installationId": 385654,
+        "shard": 7
+    }
+}
+```
+
+### `company.added`
+When a new company is added to projects.
+
+```json
+{
+    "validator": {},
+    "contentType": "object",
+    "name": "company.added",
+    "contents": {
+        "id": 61825
+    }
+}
+```
+
+### `company.deleted`
+When a company is deleted in projects.
+
+```json
+{
+    "validator": {},
+    "contentType": "object",
+    "name": "company.deleted",
+    "contents": {
+        "id": 61825
+    }
+}
+```
