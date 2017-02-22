@@ -13,7 +13,7 @@ const debug = createDebug("tw-chat:person");
  *
  * Events:
  *
- *  "update": ({Person} person, {Object} changes)
+ *  "updated": ({Person} person, {Object} changes)
  *  
  *      Emitted when the person object has been updated.
  *
@@ -68,12 +68,12 @@ export default class Person extends EventEmitter {
         this.api = api;
 
         // Node warns us that this is a potential "memory leak" however it is untrue (although it may be a sign of leaks to come).
-        // Rooms (i.e. all the rooms) listen for the "update" event on people so they can appropriately act on the information
+        // Rooms (i.e. all the rooms) listen for the "updated" event on people so they can appropriately act on the information
         // and update the room however a person can be in many rooms. This presents a problem because hundreds of rooms
         // means hundreds of event listeners on a single person object. What do we do? Disable person update
         // notifications for rooms? Disable person update notifications for the logged in user on the rooms
-        // and force the external to listen to TeamworkChat.on("user:update")? Lazy bind event handlers to the
-        // person objects until someone listens for a `person:update` event? Anyway, for now, we're increasing
+        // and force the external to listen to TeamworkChat.on("user:updated")? Lazy bind event handlers to the
+        // person objects until someone listens for a `person:updated` event? Anyway, for now, we're increasing
         // the maxEventListener size to something huge for these Person emitters only but we will have to revisit this.
         this.setMaxListeners(1000);
 
@@ -136,7 +136,7 @@ export default class Person extends EventEmitter {
         ]), update);
 
         let person = Object.assign(this, update);
-        this.emit("update", person, update);
+        this.emit("updated", person, update);
 
         // If we have a roomId, add it to the pair room
         if(details.roomId && !this.room.initialized) {

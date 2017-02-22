@@ -73,7 +73,7 @@ let NONCE = 0;
  *          Emitted when the client successfully connects to the API socket. This is
  *          emitted after authentication was successful.
  *          
- *      "message": ({String} string)
+ *      "message": ({String} message)
  *
  *          Emitted when the client recieves a "message" from the server.
  *      
@@ -259,8 +259,7 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<APIClient>} Resolves when the server has successfully completed authentication.
      */
     connect() {
-        // Get the user's profile. If this fails, it means our token is invalid
-        // and the connection will fail.
+        // Get the user's profile. If this fails, it means our token is invalid and the connection will fail.
         return this.getProfile().then(res => {
             // Save the logged in user's account to `user`;
             this.user = res.account;
@@ -291,7 +290,7 @@ export default class APIClient extends EventEmitter {
                 this.socket.on("message", this.onSocketMessage.bind(this));
 
                 // Attach the reject handler for the error handler, see below for when we remove it
-                // and add the `onSocketError` handler instead when the authentication flow completes.
+                // and add replace it with `onSocketError` handler when the authentication flow completes.
                 this.socket.on("error", reject);
 
                 // The authentication flow.
@@ -348,7 +347,7 @@ export default class APIClient extends EventEmitter {
             // We save this so `stopPing` can forcefully stop the pinging.
             this._nextPingReject = reject;
 
-            // God, this hurts my promises but it's the only nice way to do standardized cancellation.
+            // God, this hurts my promises but it's the only nice way to do standardized cancellation (A+)
             // Send the ping down the socket and wait PING_INTERVAL before attempting the next ping.
             // We `delay` here instead of before the next, outside `then` so we can reject without
             // having a pending ping left.
@@ -719,7 +718,20 @@ export default class APIClient extends EventEmitter {
                 username, password,
                 rememberMe: true
             }
-        });
+        }).then(res => {
+            if(res.ok) {
+                // Extract the tw-auth cookie from the responses
+                const cookies = res.headers.get("Set-Cookie");
+                const [ twAuthCookie ] = cookies.split(";");
+                const twAuth = twAuthCookie.split("=")[1];
+
+                debug(`Successfully logged in: tw-auth=${twAuth}`);
+                return twAuth;
+            } else {
+                debug(`login failed: ${res.status}`);
+                throw new Error(`Invalid login credentials for ${username}@${installation}.`);
+            }
+        })
     }
 
     /**
@@ -735,21 +747,8 @@ export default class APIClient extends EventEmitter {
         installation = APIClient.normalizeInstallation(installation);
 
         debug(`attempting to login with ${username} to ${installation}.`);
-        return APIClient.login(installation, username, password).then(res => {
-            if(res.ok) {
-                // Extract the tw-auth cookie from the responses
-                const cookies = res.headers.get("Set-Cookie");
-                const [ twAuthCookie ] = cookies.split(";");
-                const twAuth = twAuthCookie.split("=")[1];
-                debug(`Successfully logged in: tw-auth=${twAuth}`);
-
-                const api =  new APIClient(installation, twAuth);
-
-                return api.connect();
-            } else {
-                debug(`login failed: ${res.status}`);
-                throw new Error(`Invalid login credentials for ${username}@${installation}.`);
-            }
+        return APIClient.login(installation, username, password).then(auth => {
+            return (new APIClient(installation, auth)).connect();
         });
     }
 

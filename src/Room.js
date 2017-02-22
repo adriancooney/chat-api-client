@@ -13,7 +13,7 @@ const debug = createDebug("tw-chat:room");
  *
  * Events:
  *
- *      "update": ({Room} changes, {Object} changes)
+ *      "updated": ({Room} changes, {Object} changes)
  *
  *          Emitted when the room is updated.
  *
@@ -21,7 +21,7 @@ const debug = createDebug("tw-chat:room");
  *
  *          Emitted when a new person is added to the room.
  *
- *      "person:update": ({Person} person, {Object} changes)
+ *      "person:updated": ({Person} person, {Object} changes)
  *
  *          Emitted when a person in the room changes.
  *
@@ -108,7 +108,7 @@ export default class Room extends EventEmitter {
             return up;
         }, {}));
 
-        this.emit("update", room, details);
+        this.emit("updated", room, details);
         return room;
     }
 
@@ -129,7 +129,7 @@ export default class Room extends EventEmitter {
      * @return {Person}         The added person.
      */
     addPerson(person) {
-        person.on("update", this.emit.bind(this, "person:update"));
+        person.on("updated", this.emit.bind(this, "person:updated"));
         this.emit("person:new", person);
         this.people.push(person);
         return person;

@@ -33,11 +33,15 @@ const RECONNECT_INTERVAL = 1000 * 3;
  *          person was added to the company or projects, just that they have been
  *          loaded into memory. Once they have all been loaded into memory and this
  *          event happens, it's safe to assume the person was recently created in
- *          projects.
+ *          projects. See `person:created` for a new person added to Projects.
  *
- *      "person:update": ({Person} person, {Object} changes)
+ *      "person:updated": ({Person} person, {Object} changes)
  *
  *          A person was updated e.g. their status, "offline" to "online"
+ *
+ *      "person:created": ({Person} person)
+ *
+ *          When a new person is created in Projects.
  *
  *      "message": ({Room} room, {Message} message)
  *
@@ -124,7 +128,7 @@ export default class TeamworkChat extends Person {
 
         // Listen for person updates on the global room
         this.room.on("person:new", this.emit.bind(this, "person:new"));
-        this.room.on("person:update", this.emit.bind(this, "person:update"));
+        this.room.on("person:updated", this.emit.bind(this, "person:updated"));
 
         // Adding "error" listener to stop the EventEmitter from throwing the error if no listeners are attached.
         this.on("error", debug.bind(null, "TeamworkChat Error:"));
@@ -206,10 +210,15 @@ export default class TeamworkChat extends Person {
                     });
                 break;
 
+                case "user.added":
                 case "user.updated":
                     // As with `room.updated`, getting them from the API updates the user.
-                    return this.getPerson(frame.contents.id, false).then(room => {
-                        debug(`${frame.contents.id} person has been updated`);
+                    return this.getPerson(frame.contents.id, false).then(person => {
+                        debug(`${person.id} person has been updated`);
+
+                        if(frame.name === "user.added") {
+                            this.emit("person:created", person);
+                        } 
                     });
                 break;
 
@@ -378,7 +387,7 @@ export default class TeamworkChat extends Person {
         // Listen to updates on the room object and proxy them through this instance
         room.on("message", this.emit.bind(this, "message", room));
         room.on("message:mention", this.emit.bind(this, "message:mention", room));
-        room.on("update", this.emit.bind(this, "room:update"));
+        room.on("updated", this.emit.bind(this, "room:updated"));
 
         // Emit the new room event
         this.emit("room:new", room);
@@ -414,8 +423,10 @@ export default class TeamworkChat extends Person {
             const details = omit(rawRoom, "people");
             const participants = rawRoom.people && rawRoom.people.map(person => this.savePerson(person));
 
-            // Test if it's a direct conversation with the current user
-            if(participants && participants.length === 2 && participants.includes(this)) {
+            // Test if it's a direct conversation with the current user. There's sometimes a case where a
+            // user can be in a direct conversation with themselves. In this case, we just say it's a normal room
+            // because it's really an invalid state.
+            if(participants && participants.length === 2 && participants.includes(this) && !participants.every(person => person === this)) {
                 // If so, we can get the room attached to the user
                 const [ directUser ] = without(participants, this);
 
