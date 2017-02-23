@@ -1,4 +1,4 @@
-#!/usr/bin/env babel-node
+#!/usr/bin/env babel-node --
 import { command, getChat } from "./lib/cli";
 
 command(program => {
