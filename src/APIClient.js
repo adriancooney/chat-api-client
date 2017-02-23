@@ -1,12 +1,19 @@
 import url from "url";
 import { inspect } from "util";
 import { EventEmitter } from "events";
+import qs from "qs";
 import createDebug from "debug";
 import WebSocket from "ws";
 import fetch from "node-fetch";
 import Promise, { CancellationError, TimeoutError } from "bluebird";
 import { green, blue } from "colors";
-import { without, omit, isEqual } from "lodash";
+import { 
+    without,
+    omit,
+    omitBy,
+    isEqual,
+    isUndefined
+} from "lodash";
 import config from "../config.json";
 import pkg from "../package.json";
 
@@ -491,10 +498,11 @@ export default class APIClient extends EventEmitter {
     /**
      * Make an *unauthenticated* request to the Teamwork API.
      * 
-     * @param  {String} target              The fully qualified URL to fetch.
-     * @param  {Object} options             See Fetch API `fetch` options. Additional `raw` boolean 
-     *                                      property to return raw Response object rather than object.
-     * @return {Promise<Object|Response>}   Raw Response object or parsed JSON response. 
+     * @param  {String}  target              The fully qualified URL to fetch.
+     * @param  {Object}  options             See Fetch API `fetch` options. 
+     * @param  {Boolean} options.raw         Whether or not to return the raw response object.
+     * @param  {Object}  options.query       An object that's stringified as the URL's query parameters (see `qs` module).
+     * @return {Promise<Object|Response>}    Raw Response object or parsed JSON response. 
      */
     static request(target, options = { raw: false }) {
         // Default to JSON stringify body.
@@ -504,6 +512,17 @@ export default class APIClient extends EventEmitter {
                 ...options.headers,
                 "Content-Type": "application/json"
             };
+        }
+
+        if(options.query) {
+            if(target.includes("?")) {
+                throw new Error(
+                    `URL target "${target}" already contains query elements. ` + 
+                    `Please use the query property of the options exclusively.`
+                );
+            }
+
+            target += "?" + qs.stringify(options.query);
         }
 
         debug(">>", green(options.method || "GET"), blue(target), options);
@@ -533,20 +552,13 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Response|Object>}  See APIClient.request return value.
      */
     static requestList(target, { offset, limit, ...options } = {}) {
-        let query = [];
-
-        if(typeof offset !== "undefined") 
-            query.push(`page%5Boffset%5D=${offset}`);
-
-        if(typeof limit !== "undefined") 
-            query.push(`page%5Blimit%5D=${limit}`);
-
-        if(query.length) {
-            query = query.join("&");
-            target += target.includes("?") ? ("&" + query) : ("?" + query);
-        }
-
-        return APIClient.request(target, options)
+        return APIClient.request(target, {
+            ...options,
+            query: { 
+                ...options.query,
+                page: omitBy({ offset, limit }, isUndefined)
+            }
+        });
     }
 
     /**
@@ -583,7 +595,9 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object>} User's account details. See Teamwork API Docs.
      */
     getProfile() {
-        return this.request("/chat/me.json?includeAuth=true");
+        return this.request("/chat/me.json", { 
+            query: { includeAuth: true } 
+        });
     }
 
     /**
@@ -650,7 +664,9 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object>}          Return a room object from the API.
      */
     getRoom(room, userData = true) {
-        return this.request(`/chat/v2/rooms/${room}.json${userData ? "?includeUserData=true" : ""}`);
+        return this.request(`/chat/v2/rooms/${room}.json`, {
+            query: { includeUserData: userData }
+        });
     }
 
     /**
@@ -661,8 +677,14 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Array>}     The list of conversations. See Teamwork API Docs.
      */
     getRooms(offset = 0, limit = 10) {
-        return this.requestList(`/chat/v2/conversations.json?includeMessageData=true&includeUserData=true` +
-            `&sort=lastActivityAt`, { offset, limit });
+        return this.requestList(`/chat/v2/conversations.json`, {
+            offset, limit,
+            query: {
+                includeMessageData: true,
+                includeUserData: true,
+                sort: "lastActivityAt"
+            }
+        });
     }
 
     /**
