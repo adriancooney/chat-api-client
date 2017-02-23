@@ -763,7 +763,7 @@ export default class APIClient extends EventEmitter {
     static loginWithAuth(installation, auth) {
         installation = APIClient.normalizeInstallation(installation);
 
-        debug(`attempting to loging with auth key "${auth}" to ${installation}`);
+        debug(`attempting to login with auth key "${auth}" to ${installation}`);
         const api = new APIClient(installation, auth);
 
         return api.connect();

@@ -703,6 +703,7 @@ export default class TeamworkChat extends Person {
         if(this.forceClosed) 
             return;
 
+        debug("closing TeamworkChat connection");
         this.forceClosed = true;
         this.api.close();
     }
