@@ -156,7 +156,7 @@ export default class Person extends EventEmitter {
             this.handlerMatcher = new RegExp(`@${this.handle}`, "g");
         }
 
-        return this.handlerMatcher.test(message);
+        return message.match(this.handlerMatcher);
     }
 
     /**
