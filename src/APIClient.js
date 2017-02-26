@@ -10,6 +10,7 @@ import { green, blue } from "colors";
 import { 
     without,
     omit,
+    size,
     omitBy,
     isEqual,
     isUndefined
@@ -514,7 +515,7 @@ export default class APIClient extends EventEmitter {
             };
         }
 
-        if(options.query) {
+        if(options.query && size(options.query)) {
             if(target.includes("?")) {
                 throw new Error(
                     `URL target "${target}" already contains query elements. ` + 
@@ -522,7 +523,7 @@ export default class APIClient extends EventEmitter {
                 );
             }
 
-            target += "?" + qs.stringify(options.query);
+            target += "?" + qs.stringify(omitBy(options.query, isUndefined));
         }
 
         debug(">>", green(options.method || "GET"), blue(target), options);
@@ -534,11 +535,18 @@ export default class APIClient extends EventEmitter {
                     throw new HTTPError(res.status, res.statusText, res);
                 }
 
+                if(parseInt(res.headers.get("Content-Length")) === 0) {
+                    // If the content length is explicitly zero, just return undefined and
+                    // don't bother to parse the JSON.
+                    return;
+                }
+
                 return res.json();
             }
         }).tap(data => {
-            if(!options.raw)
-                debug("<<", blue(target), data);
+            if(!options.raw) {
+                debug("<<", blue(target), JSON.stringify(data, null, 2));
+            }
         });
     }
 
@@ -602,13 +610,23 @@ export default class APIClient extends EventEmitter {
 
     /**
      * GET /chat/v2/people.json - Return a list of people.
-     * 
-     * @param  {Number} offset    The cursor offset on the list of people.
-     * @param  {Number} limit     The amount of people to return after the cursor offset.
-     * @return {Promise<Object>}  The list of people.
+     *
+     * @param  {Object} filter        Passed filter params to the API.
+     * @param  {String} filter.since  Timestamp to only return values updated since timestamp.
+     * @param  {Number} offset        The cursor offset on the list of people.
+     * @param  {Number} limit         The amount of people to return after the cursor offset.
+     * @return {Promise<Object>}      The list of people.
      */
-    getPeople(offset, limit) {
-        return this.requestList("/chat/v2/people.json", { offset, limit });
+    getPeople(filter = {}, offset, limit) {
+        const query = {};
+
+        if(filter.since) {
+            query.filter = {
+                updatedAfter: filter.since
+            };
+        }
+
+        return this.requestList("/chat/v3/people.json", { offset, limit, query });
     }
 
     /**
@@ -657,32 +675,106 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
+     * DELETE /chat/room/<room>.json - Delete a room.
+     * 
+     * @param  {Number} room The room ID.
+     * @return {Promise}     Resolves when the room is deleted.
+     */
+    deleteRoom(room) {
+        return this.request(`/chat/rooms/${room}.json`, {
+            method: "DELETE"
+        });
+    }
+
+    /**
+     * PUT /chat/v2/conversations/<room>.json - Update a room title.
+     *
+     * This could be a generic "update" room method but one: there are only
+     * two ways a conversation details and two: the methods are vastly
+     * different.
+     * 
+     * @param  {Number} room   The room ID to update.
+     * @param  {String} title  The room title.
+     * @return {Promise}       Resolves when update is complete.
+     */
+    updateRoomTitle(room, title) {
+        return this.request(`/chat/v2/conversations/${room}.json`, {
+            method: "PUT",
+            body: { 
+                conversation: { title } 
+            }
+        })
+    }
+
+    /**
      * GET /chat/v2/rooms/<room>.json - Get a room from the server.
      * 
-     * @param  {Number}          room     The room ID.
-     * @param  {Boolean}         userData Include user data or not.
-     * @return {Promise<Object>}          Return a room object from the API.
+     * @param  {Number}          room                   The room ID.
+     * @param  {Object}          filter                 Filter returned results.
+     * @param  {Boolean}         filter.includeUsers    Include user data in returned results.
+     * @return {Promise<Object>}                        Return a room object from the API.
      */
-    getRoom(room, userData = true) {
+    getRoom(room, { includeUsers } = { includeUsers: true }) {
         return this.request(`/chat/v2/rooms/${room}.json`, {
-            query: { includeUserData: userData }
+            query: { includeUserData: includeUsers }
         });
     }
 
     /**
      * GET /chat/v2/conversations.json - Return list of conversations.
-     * 
-     * @param  {Number} offset      The conversation cursor offset.
-     * @param  {Number} limit       The number of conversations after the cursor to get.
-     * @return {Promise<Array>}     The list of conversations. See Teamwork API Docs.
+     *
+     * @param  {Object}  filter                     Filter returned rooms (i.e. query appended to URL).
+     * @param  {Boolean} filter.includeMessages     Include message data (last message) in the returned rooms.
+     * @param  {Boolean} filter.includeUsers        Include data for people in rooms.
+     * @param  {String}  filter.sort                Sort results, values: "lastActivityAt"
+     * @param  {String}  filter.status              Filter by status, values: "all"
+     * @param  {String}  filter.since               Return conversations that have activity after timestamp.
+     * @param  {Number}  offset                     The conversation cursor offset.
+     * @param  {Number}  limit                      The number of conversations after the cursor to get.
+     * @return {Promise<Array>}                     The list of conversations. See Teamwork API Docs.
      */
-    getRooms(offset = 0, limit = 10) {
+    getRooms(filter, offset = 0, limit = 10) {
+        filter = {
+            includeMessages: true,
+            includeUsers: true,
+            sort: "lastActivityAt",
+            ...filter
+        };
+
+        const query = {
+            includeUserData: filter.includeUsers,
+            includeMessageData: filter.includeMessages,
+            sort: "lastActivityAt"
+        };
+
+        if(filter.status || filter.since) {
+            query.filter = {};
+            if(filter.status) query.filter.status = filter.status;
+            if(filter.since) query.filter.activityAfter = filter.since;
+        }
+
         return this.requestList(`/chat/v2/conversations.json`, {
-            offset, limit,
+            offset, limit, query
+        });
+    }
+
+    /**
+     * Get a logged in user's messages (without room). 
+     *
+     * Note: Unfortunately, this doesn't follow the other pagination schema so you're 
+     * on your own with regards to iterating the pages and the like.
+     *
+     * @param  {Object} filter          Object containing filters.
+     * @param  {String} filter.since    Timestamp to get message from now until `since`.
+     * @param  {Number} page            The page number.
+     * @param  {Number} pageSize        The amount of messages to return per page.
+     * @return {Promise<Object>}        The messages from the API.
+     */
+    getUserMessages({ since }, page = 1, pageSize = 50) {
+        return this.request("/chat/v2/messages.json", {
             query: {
-                includeMessageData: true,
-                includeUserData: true,
-                sort: "lastActivityAt"
+                createdAfter: since,
+                page, pageSize
             }
         });
     }
@@ -729,12 +821,11 @@ export default class APIClient extends EventEmitter {
      * @param  {String}  installation   The user's installation hostname.
      * @param  {String}  username       The user's username.
      * @param  {String}  password       The user's password.
-     * @param  {Boolean} raw            Resolve the raw response object or not. Default: true
-     * @return {Promise<Response>}      Resolves to the raw response object.
+     * @return {Promise<String>}        Resolves to the user's login token `tw-auth`.
      */
-    static login(installation, username, password, raw = true) {
+    static login(installation, username, password) {
         return APIClient.request(`${installation}/launchpad/v1/login.json`, {
-            raw,
+            raw: true,
             method: "POST",
             body: {
                 username, password,
@@ -743,9 +834,7 @@ export default class APIClient extends EventEmitter {
         }).then(res => {
             if(res.ok) {
                 // Extract the tw-auth cookie from the responses
-                const cookies = res.headers.get("Set-Cookie");
-                const [ twAuthCookie ] = cookies.split(";");
-                const twAuth = twAuthCookie.split("=")[1];
+                const twAuth = extractTWAuthCookie(res.headers.get("Set-Cookie"));
 
                 debug(`Successfully logged in: tw-auth=${twAuth}`);
                 return twAuth;
@@ -907,9 +996,27 @@ export default class APIClient extends EventEmitter {
 
 export class HTTPError extends Error {
     constructor(statusCode, statusMessage, response) {
-        super(`HTTPError: ${statusCode} ${statusMessage}`);
+        super();
+        this.name = this.constructor.name;
+        this.message = `HTTPError: ${statusCode} ${statusMessage}`;
         this.statusCode = this.code = statusCode;
         this.statusMessage = statusMessage;
         this.response = response;
     }
+
+    body() {
+        return this.response.text();
+    }
+}
+
+/**
+ * Extract the TW Auth cookie from the cookie string.
+ *
+ * @private
+ * @param  {String} cookie The returned cookie string from the API.
+ * @return {String}        The `tw-auth` value.
+ */
+function extractTWAuthCookie(cookies) {
+    const [ twAuthCookie ] = cookies.split(";");
+    return twAuthCookie.split("=")[1];
 }
