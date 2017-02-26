@@ -790,7 +790,42 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
-     * DELETE /launchpad/v1/login.json - Logout from Teamwork.
+     * PUT /people/<person>/impersonate.json - Impersonate a user.
+     *
+     * TODO: Move this to it's own Projects API Client Mixin.
+     * TODO: Discuss this, ethically.
+     * 
+     * @param  {Number}     person  The person's ID.
+     * @param  {Boolean}    revert  Revert an ongoing impersonation. Don't use this however, use `unimpersonate`. The
+     *                              logic for reverting the impersonation is so close to creating the impersonation,
+     *                              it would be criminal to have a seperate request method. If this method is true
+     *                              (default: false), the `person` parameter is unnecessary and should be `null`.
+     * @return {Promise<String>}    Resolves to the user's `tw-auth` cookie.
+     */
+    impersonate(person, revert = false) {
+        return this.request(`/people/${revert ? "" : person + "/"}impersonate${revert ? "/revert" : ""}.json`, { 
+            raw: true,
+            method: "PUT"
+        }).then(res => {
+            if(res.ok) {
+                return extractTWAuthCookie(res.headers.get("Set-Cookie"));
+            } else throw new HTTPError(res.status, res.statusText, res);
+        });
+    }
+
+    /**
+     * Unimpersonate a user and refresh the auth token.
+     * @return {Promise}  Resolves when the impersonation is complete.
+     */
+    unimpersonate() {
+        return this.impersonate(null, true).then(auth => {
+            // Update our auth token
+            this.auth = auth;
+        });
+    }
+
+    /**
+     * DELETE /launchpad/v1/logout.json - Logout from Teamwork.
      * 
      * @return {Promise<Object>} Value returned from server.
      */
@@ -878,6 +913,18 @@ export default class APIClient extends EventEmitter {
         const api = new APIClient(installation, auth);
 
         return api.connect();
+    }
+
+    /**
+     * Login with a Projects "API Key".
+     * 
+     * @param  {String} installation The user's installation.
+     * @param  {String} key          The "API Key".
+     * @return {Promise<APIClient>}  Resolves to an authenticated APIClient instance.
+     */
+    static loginWithKey(installation, key) {
+        // This method of logging is caarrraaazzzzyyy.
+        return APIClient.loginWithCredentials(installation, key, "club-lemon");
     }
 
     /**
