@@ -2,7 +2,7 @@ import { inspect } from "util";
 import Promise from "bluebird";
 import moment from "moment";
 import createDebug from "debug";
-import { values, size, omit, last } from "lodash";
+import { values, size, omit, last, without } from "lodash";
 import EventEmitter from "./lib/EventEmitter";
 import Message from "./Message";
 
@@ -13,7 +13,7 @@ const debug = createDebug("tw-chat:room");
  *
  * Events:
  *
- *      "updated": ({Room} changes, {Object} changes)
+ *      "updated": ({Object} changes)
  *
  *          Emitted when the room is updated.
  *
@@ -100,7 +100,7 @@ export default class Room extends EventEmitter {
         const timestamps = ["lastActivityAt", "lastViewedAt", "updatedAt", "createdAt"];
 
         // Convert timestamps to moments
-        let room = Object.assign(this, omit(details, ...timestamps), timestamps.reduce((up, ts) => {
+        Object.assign(this, omit(details, "people", ...timestamps), timestamps.reduce((up, ts) => {
             if(details[ts]) {
                 up[ts] = moment(details[ts]);
             }
@@ -108,8 +108,21 @@ export default class Room extends EventEmitter {
             return up;
         }, {}));
 
-        this.emit("updated", room, details);
-        return room;
+        this.emit("updated", details);
+
+        return this;
+    }
+
+    /**
+     * Update the title of the room with the API.
+     * 
+     * @param  {String}     title  The new title.
+     * @return {Promise<Room>}     The updated room.
+     */
+    updateTitle(title) {
+        return this.api.updateRoomTitle(this.id, title).then(() => {
+            return this.update({ title });
+        });
     }
 
     /**
@@ -146,12 +159,53 @@ export default class Room extends EventEmitter {
     }
 
     /**
+     * Delete a person from the room.
+     * 
+     * @param  {Person} person The person to delete.
+     * @return {Person[]}      The deleted person.
+     */
+    deletePerson(person) {
+        this.emit("person:deleted", person);
+        this.people = without(this.people, person);
+        return person;
+    }
+
+    /**
+     * Handle a new person to the room.
+     * 
+     * @param  {Person} person The new person.
+     * @return {Person}        The added person.
+     */
+    handleAddedPerson(person) {
+        this.emit("person:added", person);
+        return this.addPerson(person);
+    }
+
+    /**
+     * Handle a new person to the room.
+     * 
+     * @param  {Person} person The new person.
+     * @return {Person}        The added person.
+     */
+    handleRemovedPerson(person) {
+        this.emit("person:removed", person);
+        return this.deletePerson(person);
+    }
+
+    /**
      * Event Handler: When a new message is sent to the room.
      * 
      * @param  {Message} message The new message object.
      */
     handleMessage(message) {
-        return this.saveMessage(message);
+        message = this.saveMessage(message);
+
+        this.emit("message", message);
+
+        // Handle mentions
+        if(this.api.user.isMentioned(message)) {
+            this.emit("message:mention", message);
+        }
     }
 
     /**
@@ -162,12 +216,6 @@ export default class Room extends EventEmitter {
      */
     addMessage(message) {
         this.messages.push(message);
-        this.emit("message", message);
-
-        // Handle mentions
-        if(this.api.user.isMentioned(message.content)) {
-            this.emit("message:mention", message);
-        }
 
         return message;
     }
@@ -182,7 +230,7 @@ export default class Room extends EventEmitter {
             return Promise.reject(new Error("Unable to get messages for uninitialized room."));
 
         return this.api.getMessages(this.id).then(({ messages }) => {
-            return messages.map(this.saveMessage.bind(this));
+            return messages.map(message => this.saveMessage(message));
         });
     }
 
@@ -205,6 +253,16 @@ export default class Room extends EventEmitter {
         } else {
             return this.addMessage(new Message(details));
         }
+    }
+
+    /**
+     * Delete the room from the API.
+     * @return {Promise} Resolves when the room is deleted.
+     */
+    delete() {
+        return this.api.deleteRoom(this.id).then(() => {
+            this.emit("delete");
+        });
     }
 
     /**
@@ -245,7 +303,7 @@ export default class Room extends EventEmitter {
                 // Unfortunately the API doesn't return the created message when it's a new room
                 // so we have to load messages and return the most recent.
                 return this.getMessages();
-            }).then(messages => last(messages));
+            }).then(last);
         } else {
             return this.api.sendMessage(this.id, message.content).then(message => {
                 return this.saveMessage(message);
