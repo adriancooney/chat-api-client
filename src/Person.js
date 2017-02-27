@@ -115,7 +115,15 @@ export default class Person extends EventEmitter {
      * @return {Promise<Message>}   Resolves to the sent message.
      */
     sendMessage(message) {
-        return this.room.sendMessage(message);
+        return Promise.try(() => {
+            if(!this.room.initialized) {
+                return this.api.getPerson(this.id).then(({ person }) => {
+                    this.update(person);
+                });
+            }
+        }).then(() => {
+            return this.room.sendMessage(message);
+        });
     }
 
     /**
@@ -139,7 +147,7 @@ export default class Person extends EventEmitter {
         this.emit("updated", person, update);
 
         // If we have a roomId, add it to the pair room
-        if(details.roomId && !this.room.initialized) {
+        if(details.roomId) {
             this.room.update({ id: details.roomId });
         }
 
