@@ -156,15 +156,23 @@ export default class Person extends EventEmitter {
 
     /**
      * Determine if a user has been mentioned in a message.
-     * @param  {String}  message The message content.
+     * 
+     * @param  {Message}  message The message object.
      * @return {Boolean}
      */
     isMentioned(message) {
+        if(message.author.id === this.id) {
+            // You can't be mentioned by yourself
+            return false;
+        }
+
         if(!this.handlerMatcher) {
+            // Cache the regex
             this.handlerMatcher = new RegExp(`@${this.handle}`, "g");
         }
 
-        return message.match(this.handlerMatcher);
+        // Test the message content
+        return message.content.match(this.handlerMatcher);
     }
 
     /**
