@@ -245,6 +245,7 @@ export default class Room extends EventEmitter {
         const author = this.findPersonById(rawMessage.userId);
         const details = {
             ...rawMessage,
+            room: this,
             author
         };
 

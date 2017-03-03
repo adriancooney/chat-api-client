@@ -262,16 +262,25 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
+     * Initialize (but not connect) the API account. This sets up all non-websocket related things.
+     * 
+     * @return {Object} User account returned from API.
+     */
+    initialize() {
+         // Get the user's profile. If this fails, it means our token is invalid and the connection will fail.
+        return this.getProfile().then(res => {
+            // Save the logged in user's account to `user`;
+            return this.user = res.account;
+        });
+    }
+
+    /**
      * Connect to the Chat socket server.
      * 
      * @return {Promise<APIClient>} Resolves when the server has successfully completed authentication.
      */
     connect() {
-        // Get the user's profile. If this fails, it means our token is invalid and the connection will fail.
-        return this.getProfile().then(res => {
-            // Save the logged in user's account to `user`;
-            this.user = res.account;
-
+        return this.initialize().then(user => {
             return new Promise((resolve, reject) => {
                 const { hostname } = url.parse(this.installation);
                 const env = hostname.match(/teamwork.com/) ? "production" : "development"
