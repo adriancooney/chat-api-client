@@ -1,0 +1,17 @@
+{
+  "root": "/Users/adrian/Work/Teamwork/tw-chat/bin/bots",
+  "pidPath": "/Users/adrian/Work/Teamwork/tw-chat/bin/bots/pids",
+  "sockPath": "/Users/adrian/Work/Teamwork/tw-chat/bin/bots/sock",
+  "loglength": 100,
+  "logstream": false,
+  "columns": [
+    "uid",
+    "command",
+    "script",
+    "forever",
+    "pid",
+    "id",
+    "logfile",
+    "uptime"
+  ]
+}

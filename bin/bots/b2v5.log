@@ -1,0 +1,11 @@
+info: creating new micro manager handle=adrianc, clockInTime=undefined, clockOutTime=undefined, promptInterval=undefined
+/Users/adrian/Work/Teamwork/tw-chat/bin/lib/bot.js:66
+process.on("SIGUSR1", () => gracefullyExit.catch(fatal));
+                                                ^
+
+TypeError: gracefullyExit.catch is not a function
+    at process.on (/Users/adrian/Work/Teamwork/tw-chat/bin/lib/bot.js:66:49)
+    at emitNone (events.js:86:13)
+    at process.emit (events.js:186:7)
+    at Signal.wrap.onsignal (internal/process.js:200:44)
+error: Forever detected script exited with code: 1

@@ -1,0 +1,62 @@
+#!/usr/bin/env babel-node --
+import fs from "fs";
+import path from "path";
+import Promise from "bluebird";
+import forever from "forever";
+import { command, getChat } from "./lib/cli";
+
+command(program => {
+    return new Promise((resolve, reject) => {
+        program
+            .command("start")
+            .description("start the bot")
+            .option("-c, --config <config file>", "specify the config file to use")
+            .option("-d, --daemon", "run the bot in the background")
+            .action(options => startBots(options.config, options.daemon).then(resolve, reject));
+
+        program
+            .command("stop")
+            .description("stop the bot daemon")
+            .action(() => stopBots().then(resolve, reject));
+
+        program.parse(process.argv);
+    });
+});
+
+async function startBots(configPath, daemon) {
+    if(!configPath) {
+        throw new Error("Path to config required.");
+    }
+
+    configPath = path.resolve(process.cwd(), configPath);
+
+    if(!fs.existsSync(configPath)) {
+        throw new Error("Config file does not exist.");
+    }
+
+    const starter = daemon ? forever.startDaemon : forever.start;
+
+    starter(path.join(__dirname, "lib/bot.js"), {
+        args: [configPath],
+        killSignal: "SIGUSR1",
+        max: 1
+    });
+}
+
+async function stopBots() {
+    const procs = await Promise.fromCallback(forever.list.bind(forever, false));
+
+    if(!procs)
+        return;
+
+    await Promise.all(procs.map((proc, i) => {
+        if(proc.file && proc.file.match(/bot\.js$/)) {
+            const emitter = forever.stop(i);
+
+            return new Promise((resolve, reject) => {
+                emitter.on("error", reject);
+                emitter.on("stop", resolve);
+            });
+        }
+    }).filter(p => p));
+}
