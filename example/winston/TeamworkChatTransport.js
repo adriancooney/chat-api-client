@@ -54,7 +54,7 @@ export default class Chat extends Transport {
     }
 
     static formatMessage(level, msg, meta) {
-        return `**[${level}]** ${msg}`;
+        return `${(new Date).toString()} **[${level}]** ${msg}`;
     }
 }
 

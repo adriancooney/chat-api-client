@@ -2,13 +2,15 @@ import Promise from "bluebird";
 import { zipObject } from "lodash";
 import TeamworkChat, { HTTPError } from "../..";
 
-runScript("Soccer Mondays!", `
-    @adrian: hi guys.
-    @dwight: what's the shtory hi
-    @michael: not much, yourself?
+runTranscript("General", `
+    @adrian: @all how's those reports coming?
+    @dwight: morning everybody
+    @michael: where's my coffee?
+    @michael: @dwight?
+    @pam: I'll get it @michael
 `);
 
-export function runScript(roomTitle, script) {
+export function runTranscript(roomTitle, script) {
     // Split up the script into { handle, line }
     const lines = script.split("\n").filter(line => line.trim()).map(line => {
         line = line.trim().split(":");
@@ -20,7 +22,7 @@ export function runScript(roomTitle, script) {
     });
 
     // Log in as the admin user
-    return TeamworkChat.fromAuth("http://1486461376533.teamwork.com", "nw3Ujj83Gcz76vcOEIitdti5rfsPW-120606").then(admin => {
+    return TeamworkChat.fromAuth("<installation>", "<auth>").then(admin => {
         // Impersonate all the users involved in the script
         return [admin, Promise.all(lines.map(({ handle }) => admin.impersonateByHandle(handle)))];
     }).spread((admin, users) => {
