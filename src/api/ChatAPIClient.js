@@ -1,22 +1,17 @@
+// @flow
 import url from "url";
-import { inspect } from "util";
-import { EventEmitter } from "events";
-import qs from "qs";
 import createDebug from "debug";
 import WebSocket from "ws";
-import fetch from "node-fetch";
 import Promise, { CancellationError, TimeoutError } from "bluebird";
 import { green, blue } from "colors";
 import { 
     without,
-    omit,
     size,
-    omitBy,
-    isEqual,
-    isUndefined
+    isEqual
 } from "lodash";
-import config from "../config.json";
-import pkg from "../package.json";
+import { AbstractAPIClient, HTTPError } from "./CommonAPIClient";
+import config from "../../config.json";
+import pkg from "../../package.json";
 
 const debug = createDebug("tw-chat:api");
 
@@ -68,6 +63,20 @@ export const STATUS_TYPES = ["idle", "active"];
  */
 let NONCE = 0;
 
+type APIFrame = {
+    name: string,
+    contents: Object,
+    nonce?: number|null
+};
+
+type FrameFilter = string|{
+    type?: string,
+    nonce?: number,
+    contents?: Object
+};
+
+type Status = "idle" | "active";
+
 /**
  * The (mostly) raw connector to the Teamwork Chat API. This intentionally DOES NOT
  * transform the returned response from the API (aside from deserializing the JSON),
@@ -100,7 +109,7 @@ let NONCE = 0;
  *          Websocket).
  *          
  */
-export default class APIClient extends EventEmitter {
+export default class ChatAPIClient extends AbstractAPIClient {
     /** @type {Function} The implementation of the WebSocket class */
     static WebSocket = WebSocket;
 
@@ -109,35 +118,26 @@ export default class APIClient extends EventEmitter {
      * 
      * @type {Array<Object>}
      */
-    awaiting = [];
+    awaiting: {filter: FrameFilter, resolve: Function, reject: Function}[] = [];
+
+    /** @type {WebSocket} The Chat websocket. */
+    socket: WebSocket;
 
     /**
-     * The current logged in user's account details returned from `me.json`
-     * @type {Object}
-     */
-    user;
-
-    /**
-     * Create an authorized APIClient object.
+     * Contains the reject function of the current ping promise. Don't touch.
      * 
-     * @param  {String} installation The user's installation.
-     * @param  {String} auth         The `tw-auth` token.
-     * @return {APIClient}           The authorized APIClient instance.
+     * @private
+     * @type {Function}
      */
-    constructor(installation, auth) {
-        super();
-        
-        this.installation = installation;
-        this.auth = auth;
-    }
+    _nextPingReject: Function;
 
     /**
      * Send a raw object down the socket.
      * 
-     * @param  {Object|String}          frame The object (will be serialized) or string.
-     * @return {Promise<Object|String>}       The frame object (or string) sent.
+     * @param  {Object|String}    frame The object (will be serialized) or string.
+     * @return {Promise<String>}        The frame object (or string) sent.
      */
-    send(frame) {
+    send(frame: Object|string): Promise<string> {
         debug("sending message", frame);
         return Promise.try(() => {
             if(!this.connected) {
@@ -154,12 +154,12 @@ export default class APIClient extends EventEmitter {
     /**
      * Send a frame down the socket to the server.
      * 
-     * @param  {String} name        The type of the frame. See APICLient.createFrame.
-     * @param  {Any}    contents    The contents of the frame.
+     * @param  {String}         name        The type of the frame. See APICLient.createFrame.
+     * @param  {Object|String}  contents    The contents of the frame.
      * @return {Promise<Object>}    Resolves the raw packet object sent down the line.
      */
-    sendFrame(type, contents = {}) {
-        const frame = APIClient.createFrame(type, contents);
+    sendFrame(type: string, contents: Object = {}): Promise<APIFrame> {
+        const frame = ChatAPIClient.createFrame(type, contents);
         return this.send(frame).return(frame);
     }
 
@@ -170,7 +170,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} timeout     The number in ms before timing out (defaults 30s).
      * @return {Promise<Object>}    Resolves to the raw object packet returned from the server.
      */
-    awaitFrame(filter, timeout = 30000) {
+    awaitFrame(filter: FrameFilter, timeout: number = 30000): Promise<APIFrame> {
         return new Promise((resolve, reject) => {
             this.awaiting.push(filter = {
                 filter, resolve, reject
@@ -188,16 +188,23 @@ export default class APIClient extends EventEmitter {
      * @param  {...Object} filters  Filters applied to APIClient#awaitFrame.
      * @return {Promise<Object>}    Resolves to the raw object packet returned from the server.
      */
-    raceFrames(...filters) {
+    raceFrames(...filters: FrameFilter[]): Promise<APIFrame> {
         const race = filters.map(filter => this.awaitFrame(filter));
 
         return Promise.any(race).finally(() => {
             // Kill any waiting promises.
             race.forEach((prom, i) => {
                 if(prom.isPending()) {
+                    // Find the pending filter
                     const filter = this.awaiting.find(({ filter }) => filter === filters[i]);
+
+                    // Remove it from the awaiting
                     this.awaiting = without(this.awaiting, filter);
-                    filter.reject(new CancellationError());
+
+                    // Raise the cancellation
+                    if(filter) {
+                        filter.reject(new CancellationError());
+                    }
                 }
             });
         });
@@ -208,13 +215,13 @@ export default class APIClient extends EventEmitter {
      * matching nonces).
      * 
      * @param  {String} type        The type of the frame. See APICLient.createFrame.
-     * @param  {Object} frame       The contents of the frame. See APICLient#createFrame.
+     * @param  {Object} contents       The contents of the frame. See APICLient#createFrame.
      * @param  {Number} timeout     The number of ms before timing out the request.
      * @return {Promise<Object>}    Resolves to the reponse frame.
      */
-    socketRequest(type, frame, timeout) {
-        debug(`socket request: ${type} (timeout = ${timeout})`, JSON.stringify(frame))
-        return this.sendFrame(type, frame).then(packet => {
+    socketRequest(type: string, contents: Object, timeout?: number): Promise<APIFrame> {
+        debug(`socket request: ${type}`, JSON.stringify(contents))
+        return this.sendFrame(type, contents).then(packet => {
             return this.awaitFrame({ nonce: packet.nonce }, timeout);
         }).tap(packet => {
             debug("socket response:", JSON.stringify(packet));
@@ -226,7 +233,7 @@ export default class APIClient extends EventEmitter {
      * 
      * @param  {Error} error
      */
-    onSocketError(error) {
+    onSocketError(error: Error) {
         debug("socket error", error);
         this.emit("error", error);
     }
@@ -236,13 +243,13 @@ export default class APIClient extends EventEmitter {
      * 
      * @param  {String} message Raw frame string returned from server.
      */
-    onSocketMessage(message) {
+    onSocketMessage(message: string) {
         debug("incoming frame", message);
         const frame = JSON.parse(message);
 
         if(this.awaiting.length) {
             this.awaiting.slice().forEach(filter => {
-                if(APIClient.matchFrame(filter.filter, frame)) {
+                if(ChatAPIClient.matchFrame(filter.filter, frame)) {
                     filter.resolve(frame);
                 }
             });
@@ -262,28 +269,15 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
-     * Initialize (but not connect) the API account. This sets up all non-websocket related things.
-     * 
-     * @return {Object} User account returned from API.
-     */
-    initialize() {
-         // Get the user's profile. If this fails, it means our token is invalid and the connection will fail.
-        return this.getProfile().then(res => {
-            // Save the logged in user's account to `user`;
-            return this.user = res.account;
-        });
-    }
-
-    /**
      * Connect to the Chat socket server.
      * 
      * @return {Promise<APIClient>} Resolves when the server has successfully completed authentication.
      */
-    connect() {
+    connect(): Promise<ChatAPIClient> {
         return this.initialize().then(user => {
             return new Promise((resolve, reject) => {
-                const { hostname } = url.parse(this.installation);
-                const env = hostname.match(/teamwork.com/) ? "production" : "development"
+                const { hostname } = url.parse(this.client.installation);
+                const env = hostname && hostname.match(/teamwork.com/) ? "production" : "development"
                 let server = config[env].server;
 
                 if(env === "development") {
@@ -298,9 +292,9 @@ export default class APIClient extends EventEmitter {
                 });
 
                 debug(`connecting socket server to ${socketServer}`);
-                this.socket = new APIClient.WebSocket(socketServer, {
+                this.socket = new ChatAPIClient.WebSocket(socketServer, {
                     headers: {
-                        Cookie: `tw-auth=${this.auth}`
+                        Cookie: `tw-auth=${this.client.auth}`
                     }
                 });
 
@@ -314,11 +308,13 @@ export default class APIClient extends EventEmitter {
                 this.socket.on("open", () => {
                     // Wait for the authentication request frame and send back the auth frame.
                     this.awaitFrame("authentication.request").then(message => {
+                        const user = this.client.user;
+
                         return this.sendFrame("authentication.response", {
-                            authKey: this.user.authkey,
-                            userId: parseInt(this.user.id),
-                            installationDomain: this.user.url,
-                            installationId: parseInt(this.user.installationId),
+                            authKey: user.authkey,
+                            userId: parseInt(user.id),
+                            installationDomain: user.url,
+                            installationId: parseInt(user.installationId),
                             clientVersion: pkg.version
                         });
                     }).then(() => {
@@ -357,7 +353,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} attempt PRIVATE: The number used to track which attempt were on, do not use.
      * @return {Promise}        A promise that resolves when `stopPing` is called.
      */
-    nextPing(attempt = 0) {
+    nextPing(attempt:number = 0): Promise<APIFrame> {
         return new Promise((resolve, reject) => {
             debug("attempting ping");
 
@@ -426,18 +422,18 @@ export default class APIClient extends EventEmitter {
      * 
      * @return {Boolean} connected or not.
      */
-    get connected() {
+    isConnected(): boolean {
         return this.socket && this.socket.readyState === WebSocket.OPEN;
     }
 
     /**
      * Socket Event: "room.message.created" - Send (or create) a message to a room.
      * 
-     * @param  {Room}       room    The target room to recieve the message.
-     * @param  {Message}    message The message to send.
+     * @param  {Number}     room    The target room to recieve the message.
+     * @param  {Object}     message The message to send.
      * @return {Promise<Object>}    The raw response frame returned from the server.
      */
-    sendMessage(room, message) {
+    sendMessage(room: number, message: Object): Promise<APIFrame> {
         return this.socketRequest("room.message.created", {
             roomId: room,
             body: message
@@ -449,10 +445,7 @@ export default class APIClient extends EventEmitter {
      * 
      * @param {String} status One of: "idle"|"active"
      */
-    updateStatus(status) {
-        if(!STATUS_TYPES.includes(status))
-            throw new Error(`Status must be one of {${STATUS_TYPES.join(", ")}}. Invalid status: ${status}.`);
-
+    updateStatus(status: Status): Promise<APIFrame> {
         return this.sendFrame("user.modified.status", { status })
     }
 
@@ -461,7 +454,7 @@ export default class APIClient extends EventEmitter {
      * 
      * @return {Promise<Object>} Resolves to the unseen counts frame from the socket server.
      */
-    getUnseenCount() {
+    getUnseenCount(): Promise<APIFrame> {
         return this.sendFrame("unseen.counts.request").then(() => {
             return this.awaitFrame("unseen.counts.updated");
         });
@@ -473,7 +466,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} room        The room ID to send the room active frame for.
      * @return {Promise<Object>}    Resolves to the sent frame.
      */
-    activateRoom(room) {
+    activateRoom(room: number): Promise<APIFrame> {
         return this.sendFrame("room.user.active", {
             roomId: room,
             date: new Date()
@@ -487,7 +480,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number}  room     The room ID.
      * @return {Promise<Object>}    Resolves to the sent frame.
      */
-    typing(isTyping, room) {
+    typing(isTyping: boolean, room: number): Promise<APIFrame> {
         return this.sendFrame("room.typing", {
             isTyping: status,
             roomId: room
@@ -501,120 +494,8 @@ export default class APIClient extends EventEmitter {
      * @param  {Number}         timeout The timeout before the socket request times out. Default: PING_TIMEOUT
      * @return {Promise<Object>}        Resolves to the recieved ping frame.
      */
-    ping(timeout = PING_TIMEOUT) {
+    ping(timeout: number = PING_TIMEOUT): Promise<APIFrame> {
         return this.socketRequest("ping", {}, timeout);
-    }
-
-    /**
-     * Make an *unauthenticated* request to the Teamwork API.
-     * 
-     * @param  {String}  target              The fully qualified URL to fetch.
-     * @param  {Object}  options             See Fetch API `fetch` options. 
-     * @param  {Boolean} options.raw         Whether or not to return the raw response object.
-     * @param  {Object}  options.query       An object that's stringified as the URL's query parameters (see `qs` module).
-     * @return {Promise<Object|Response>}    Raw Response object or parsed JSON response. 
-     */
-    static request(target, options = { raw: false }) {
-        // Default to JSON stringify body.
-        if(typeof options.body === "object") {
-            options.body = JSON.stringify(options.body);
-            options.headers = {
-                ...options.headers,
-                "Content-Type": "application/json"
-            };
-        }
-
-        if(options.query && size(options.query)) {
-            if(target.includes("?")) {
-                throw new Error(
-                    `URL target "${target}" already contains query elements. ` + 
-                    `Please use the query property of the options exclusively.`
-                );
-            }
-
-            target += "?" + qs.stringify(omitBy(options.query, isUndefined));
-        }
-
-        debug(">>", green(options.method || "GET"), blue(target), options);
-        return Promise.try(fetch.bind(null, target, options)).then(res => {
-            debug(res.status, res.statusText);
-            if(options.raw) return res;
-            else {
-                if(!res.ok) {
-                    throw new HTTPError(res.status, res.statusText, res);
-                }
-
-                if(parseInt(res.headers.get("Content-Length")) === 0) {
-                    // If the content length is explicitly zero, just return undefined and
-                    // don't bother to parse the JSON.
-                    return;
-                }
-
-                return res.json();
-            }
-        }).tap(data => {
-            if(!options.raw) {
-                debug("<<", blue(target), JSON.stringify(data, null, 2));
-            }
-        });
-    }
-
-    /**
-     * Make an unauthenticated request for a list of items from the server with offset and limit.
-     * 
-     * @param  {String}    target          The URL target. See APIClient.request.
-     * @param  {Object}    options         The options object passed to APIClient.request.
-     * @param  {Number}    options.offset  The cursor offset.
-     * @param  {Number}    options.limit   The number of items to return after `offset`.
-     * @return {Promise<Response|Object>}  See APIClient.request return value.
-     */
-    static requestList(target, { offset, limit, ...options } = {}) {
-        return APIClient.request(target, {
-            ...options,
-            query: { 
-                ...options.query,
-                page: omitBy({ offset, limit }, isUndefined)
-            }
-        });
-    }
-
-    /**
-     * Make an *authenticated* request to the Teamwork API.
-     *
-     * @param  {String} path                The path part of the URL to be appended to the user installation for the request.
-     * @param  {Object} options             See APIClient.request.
-     * @return {Promise<Object|Response>}   See APIClient.request return value.
-     */
-    request(path, options = {}, requester = APIClient.request) {
-        return requester(`${this.installation}${path}`, {
-            ...options,
-            headers: {
-                ...options.headers,
-                Cookie: `tw-auth=${this.auth}`
-            }
-        });
-    }
-
-    /**
-     * Make an authenticated request for a list of items from the server with offset and limit.
-     * 
-     * @param  {String}    target          The URL target. See APIClient.request.
-     * @param  {Object}    options         The options object passed to APIClient.requestList.
-     * @return {Promise<Response|Object>}  See APIClient.request return value.
-     */
-    requestList(path, options) {
-        return this.request(path, options, APIClient.requestList);
-    }
-
-    /**
-     * GET /chat/me.json - Return the currently logged in user's account.
-     * 
-     * @return {Promise<Object>} User's account details. See Teamwork API Docs.
-     */
-    getProfile() {
-        return this.request("/chat/me.json", { 
-            query: { includeAuth: true } 
-        });
     }
 
     /**
@@ -626,7 +507,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} limit         The amount of people to return after the cursor offset.
      * @return {Promise<Object>}      The list of people.
      */
-    getPeople(filter = {}, offset, limit) {
+    getPeople(filter: Object = {}, offset: number, limit: number): Promise<Object> {
         const query = {};
 
         if(filter.since) {
@@ -644,7 +525,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number}         id  The person's ID.
      * @return {Promise<Object>}    Person object response.
      */
-    getPerson(id) {
+    getPerson(id: number): Promise<Object> {
         return this.request(`/chat/people/${id}.json`);
     }
 
@@ -655,7 +536,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Object}          update The update object.
      * @return {Promise<Object>}        The API response object.
      */
-    updatePerson(id, update) {
+    updatePerson(id: number, update: Object): Promise<Object> {
         return this.request(`/chat/people/${id}.json`, {
             method: "PUT",
             body: update
@@ -669,7 +550,7 @@ export default class APIClient extends EventEmitter {
      * @param  {String}         message  The initial message for the new room.
      * @return {Promise<Object>}         The server response with the room ID.
      */
-    createRoom(handles, message) {
+    createRoom(handles: string[], message: string): Promise<Object> {
         return this.request("/chat/v2/rooms.json", {
             method: "POST",
             body: {
@@ -689,7 +570,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} room The room ID.
      * @return {Promise}     Resolves when the room is deleted.
      */
-    deleteRoom(room) {
+    deleteRoom(room: number): Promise<Object> {
         return this.request(`/chat/rooms/${room}.json`, {
             method: "DELETE"
         });
@@ -706,7 +587,7 @@ export default class APIClient extends EventEmitter {
      * @param  {String} title  The room title.
      * @return {Promise}       Resolves when update is complete.
      */
-    updateRoomTitle(room, title) {
+    updateRoomTitle(room: number, title: string): Promise<Object> {
         return this.request(`/chat/v2/conversations/${room}.json`, {
             method: "PUT",
             body: { 
@@ -723,7 +604,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Boolean}         filter.includeUsers    Include user data in returned results.
      * @return {Promise<Object>}                        Return a room object from the API.
      */
-    getRoom(room, { includeUsers } = { includeUsers: true }) {
+    getRoom(room: number, { includeUsers }: { includeUsers: boolean } = { includeUsers: true }) {
         return this.request(`/chat/v2/rooms/${room}.json`, {
             query: { includeUserData: includeUsers }
         });
@@ -742,7 +623,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number}  limit                      The number of conversations after the cursor to get.
      * @return {Promise<Array>}                     The list of conversations. See Teamwork API Docs.
      */
-    getRooms(filter, offset = 0, limit = 10) {
+    getRooms(filter: Object, offset: number = 0, limit: number = 10) {
         filter = {
             includeMessages: true,
             includeUsers: true,
@@ -753,7 +634,8 @@ export default class APIClient extends EventEmitter {
         const query = {
             includeUserData: filter.includeUsers,
             includeMessageData: filter.includeMessages,
-            sort: "lastActivityAt"
+            sort: "lastActivityAt",
+            filter: undefined
         };
 
         if(filter.status || filter.since) {
@@ -779,7 +661,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} pageSize        The amount of messages to return per page.
      * @return {Promise<Object>}        The messages from the API.
      */
-    getUserMessages({ since }, page = 1, pageSize = 50) {
+    getUserMessages({ since }: Object, page: number = 1, pageSize: number = 50): Promise<Object> {
         return this.request("/chat/v2/messages.json", {
             query: {
                 createdAfter: since,
@@ -794,146 +676,8 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} room The room ID.
      * @return {Object}      The messages return from the API.
      */
-    getMessages(room) {
+    getMessages(room: number): Promise<Object> {
         return this.request(`/chat/v2/rooms/${room}/messages.json`);
-    }
-
-    /**
-     * PUT /people/<person>/impersonate.json - Impersonate a user.
-     *
-     * TODO: Move this to it's own Projects API Client Mixin.
-     * TODO: Discuss this, ethically.
-     * 
-     * @param  {Number}     person  The person's ID.
-     * @param  {Boolean}    revert  Revert an ongoing impersonation. Don't use this however, use `unimpersonate`. The
-     *                              logic for reverting the impersonation is so close to creating the impersonation,
-     *                              it would be criminal to have a seperate request method. If this method is true
-     *                              (default: false), the `person` parameter is unnecessary and should be `null`.
-     * @return {Promise<String>}    Resolves to the user's `tw-auth` cookie.
-     */
-    impersonate(person, revert = false) {
-        return this.request(`/people/${revert ? "" : person + "/"}impersonate${revert ? "/revert" : ""}.json`, { 
-            raw: true,
-            method: "PUT"
-        }).then(res => {
-            if(res.ok) {
-                return extractTWAuthCookie(res.headers.get("Set-Cookie"));
-            } else throw new HTTPError(res.status, res.statusText, res);
-        });
-    }
-
-    /**
-     * Unimpersonate a user and refresh the auth token.
-     * @return {Promise}  Resolves when the impersonation is complete.
-     */
-    unimpersonate() {
-        return this.impersonate(null, true).then(auth => {
-            // Update our auth token
-            this.auth = auth;
-        });
-    }
-
-    /**
-     * DELETE /launchpad/v1/logout.json - Logout from Teamwork.
-     * 
-     * @return {Promise<Object>} Value returned from server.
-     */
-    logout() {
-        return this.request(`/launchpad/v1/logout.json`, { method: "DELETE" });
-    }
-
-    /**
-     * GET authenticate.teamwork.com/launchpad/v1/accounts.json - Return a user's accounts.
-     * 
-     * @param  {String} username    The user's username.
-     * @param  {String} password    The user's password.
-     * @return {Promise<Object>}    Returns list of user's accounts. See Teamwork API Docs.
-     */
-    static getAccounts(username, password) {
-        return APIClient.request("http://authenticate.teamwork.com/launchpad/v1/accounts.json", {
-            methods: "POST",
-            body: {
-                email: username,
-                password
-            }
-        });
-    }
-
-    /**
-     * POST <installation>/launchpad/v1/login.json - Login to Teamwork with credentials.
-     * 
-     * @param  {String}  installation   The user's installation hostname.
-     * @param  {String}  username       The user's username.
-     * @param  {String}  password       The user's password.
-     * @return {Promise<String>}        Resolves to the user's login token `tw-auth`.
-     */
-    static login(installation, username, password) {
-        return APIClient.request(`${installation}/launchpad/v1/login.json`, {
-            raw: true,
-            method: "POST",
-            body: {
-                username, password,
-                rememberMe: true
-            }
-        }).then(res => {
-            if(res.ok) {
-                // Extract the tw-auth cookie from the responses
-                const twAuth = extractTWAuthCookie(res.headers.get("Set-Cookie"));
-
-                debug(`Successfully logged in: tw-auth=${twAuth}`);
-                return twAuth;
-            } else {
-                debug(`login failed: ${res.status}`);
-                throw new Error(`Invalid login credentials for ${username}@${installation}.`);
-            }
-        })
-    }
-
-    /**
-     * Login and connect to the chat server.
-     * 
-     * @param  {String|Object}  installation The user's installation.
-     * @param  {String}         username     The user's username.
-     * @param  {String}         password     The user's password.
-     * @return {Promise<APIClient>}          Resolves to a new instance of APIClient that can make authenticated requests
-     *                                       as the user. The user's details can be access at `APIClient.user`.
-     */
-    static loginWithCredentials(installation, username, password) {
-        installation = APIClient.normalizeInstallation(installation);
-
-        debug(`attempting to login with ${username} to ${installation}.`);
-        return APIClient.login(installation, username, password).then(auth => {
-            return (new APIClient(installation, auth)).connect();
-        });
-    }
-
-    /**
-     * Login with a pre-existing auth key.
-     * 
-     * @param  {String|Object}  installation  The user's installation.
-     * @param  {String}         auth          The user's auth key (this will fail if the auth key is invalid or expired).
-     * @return {Promise<APIClient>}           Resolves to a new instance of APIClient that can make authenticated requests
-     *                                        as the user. The user's details can be access at `APIClient.user`.
-     */
-    static loginWithAuth(installation, auth) {
-        installation = APIClient.normalizeInstallation(installation);
-
-        debug(`attempting to login with auth key "${auth}" to ${installation}`);
-        const api = new APIClient(installation, auth);
-
-        return api.connect();
-    }
-
-    /**
-     * Login with a Projects "API Key".
-     * 
-     * @param  {String} installation The user's installation.
-     * @param  {String} key          The "API Key".
-     * @return {Promise<APIClient>}  Resolves to an authenticated APIClient instance.
-     */
-    static loginWithKey(installation, key) {
-        // This method of logging is caarrraaazzzzyyy.
-        return APIClient.loginWithCredentials(installation, key, "club-lemon");
     }
 
     /**
@@ -944,7 +688,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Boolean}    nonced   Whether or not to nonce the frame.
      * @return {Object}              The raw object packet to be stringified and sent to the server.
      */
-    static createFrame(type, contents = {}, nonced = true) {
+    static createFrame(type: string, contents: Object = {}, nonced: boolean = true): APIFrame {
         return {
             contentType: "object",
             source: {
@@ -977,7 +721,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Object}         frame       The raw frame packet returned from the server.
      * @return {Boolean}                    Whether or not the filter matches the frame.
      */
-    static matchFrame(filter, frame) {
+    static matchFrame(filter: FrameFilter, frame: APIFrame): boolean {
         if(typeof filter === "string")
             filter = { type: filter };
 
@@ -1003,76 +747,9 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
-     * Conver an installation input (object or string) to a string.
-     * 
-     * @param  {Object|String} installation The installation descriptor.
-     * @return {String}                     The installation URL.
-     */
-    static normalizeInstallation(installation) {
-        if(typeof installation === "object") {
-            installation = url.format({
-                protocol: "http:",
-                ...installation
-            });
-        }
-
-        // Remove any trailing slash
-        return installation.replace(/\/$/, "");
-    }
-
-    /**
      * Custom `console.log` output.
      */
-    inspect() {
-        return `APIClient[authorized, auth=${this.auth}]`;
+    inspect(): string {
+        return `ChatAPIClient[authorized, auth=${this.client.auth}]`;
     }
-
-    /**
-     * Convert this instance to JSON (returns the data required to exactly recreate this instance).
-     *
-     * Example:
-     *
-     *      const { installation, auth } = chat.toJSON();
-     *
-     *      const newChat = new TeamworkChat(installation, auth);
-     *
-     *      newChat.connect().then(chat => {
-     *          // Connected chat!
-     *      });
-     *      
-     * @return {Object} Serialized TeamworkChat.
-     */
-    toJSON() {
-        return {
-            auth: this.auth,
-            installation: this.installation
-        };
-    }
-}
-
-export class HTTPError extends Error {
-    constructor(statusCode, statusMessage, response) {
-        super();
-        this.name = this.constructor.name;
-        this.message = `HTTPError: ${statusCode} ${statusMessage}`;
-        this.statusCode = this.code = statusCode;
-        this.statusMessage = statusMessage;
-        this.response = response;
-    }
-
-    body() {
-        return this.response.text();
-    }
-}
-
-/**
- * Extract the TW Auth cookie from the cookie string.
- *
- * @private
- * @param  {String} cookie The returned cookie string from the API.
- * @return {String}        The `tw-auth` value.
- */
-function extractTWAuthCookie(cookies) {
-    const [ twAuthCookie ] = cookies.split(";");
-    return twAuthCookie.split("=")[1];
 }

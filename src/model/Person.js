@@ -3,7 +3,7 @@ import Promise from "bluebird";
 import moment from "moment";
 import createDebug from "debug";
 import { omit } from "lodash";
-import EventEmitter from "./lib/EventEmitter";
+import Model from "../lib/Model";
 import Room from "./Room";
 
 const debug = createDebug("tw-chat:person");
@@ -33,7 +33,7 @@ const debug = createDebug("tw-chat:person");
  *      current Person object.
  * 
  */
-export default class Person extends EventEmitter {
+export default class Person extends Model {
     /** @type {Number} The user's id. */
     id;
 
@@ -62,10 +62,8 @@ export default class Person extends EventEmitter {
      * @param  {Object}     details Optional, the person details to pass to Person#Update.
      * @return {Person}
      */
-    constructor(api, details) {
-        super();
-        
-        this.api = api;
+    constructor(client, details) {
+        super(client);
 
         // Node warns us that this is a potential "memory leak" however it is untrue (although it may be a sign of leaks to come).
         // Rooms (i.e. all the rooms) listen for the "updated" event on people so they can appropriately act on the information
