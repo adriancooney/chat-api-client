@@ -2,6 +2,9 @@
   "name": "@teamwork/tw-chat",
   "version": "0.0.1",
   "main": "src/index.js",
+  "bin": {
+    "tw-chat": "./build/bin/tw-chat"
+  },
   "dependencies": {
     "babel-cli": "^6.23.0",
     "babel-plugin-transform-builtin-extend": "^1.1.2",
@@ -27,6 +30,7 @@
     "babel-preset-stage-0": "^6.22.0",
     "babel-register": "^6.22.0",
     "mocha": "^3.2.0",
+    "renamer": "^0.6.1",
     "sinon": "^2.0.0-pre.4",
     "webpack": "2"
   },
@@ -35,16 +39,17 @@
     "build:src": "babel -d build/src src",
     "build:bin:lib": "babel -d build/bin/lib bin/lib",
     "build:bin:tw-chat": "babel -d build bin/tw-chat*",
-    "build:bin:rename": "rename -d '.js' build/bin/*",
+    "build:bin:rename": "renamer --find '.js' --replace '' build/bin/*",
     "build:bin:fix-binary": "replace '#!/usr/bin/env babel-node --' '#!/usr/bin/env node' build/bin -r",
     "build:bin:chmod": "chmod +x build/bin/*",
     "build:bin:copy-json": "cp *.json build/",
-    "build:bin": "yarn run build:bin:lib && yarn run build:bin:tw-chat && yarn run build:bin:rename && yarn run build:bin:fix-binary && yarn run build:bin:chmod && yarn run build:bin:copy-json",
-    "build": "yarn run clean && yarn run build:src && yarn run build:bin",
+    "build:bin": "npm run build:bin:lib && npm run build:bin:tw-chat && npm run build:bin:rename && npm run build:bin:fix-binary && npm run build:bin:chmod && npm run build:bin:copy-json",
+    "build": "npm run clean && npm run build:src && npm run build:bin",
     "browser:build": "webpack -p",
     "browser:test:build": "webpack --output-pathinfo --config test/browser/webpack.test.config.js",
-    "browser:test": "yarn run browser:test:build && open ./test/browser/index.html",
-    "test": "mocha --compilers js:babel-register --require babel-polyfill"
+    "browser:test": "npm run browser:test:build && open ./test/browser/index.html",
+    "test": "mocha --compilers js:babel-register --require babel-polyfill",
+    "prepublish": "npm run build"
   },
   "babel": {
     "presets": [
