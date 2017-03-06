@@ -51,7 +51,7 @@
     "browser:test:build": "webpack --output-pathinfo --config test/browser/webpack.test.config.js",
     "browser:test": "npm run browser:test:build && open ./test/browser/index.html",
     "test": "mocha --compilers js:babel-register --require babel-polyfill",
-    "preinstall": "npm run build"
+    "prepublish": "npm run build"
   },
   "babel": {
     "presets": [
