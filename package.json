@@ -31,9 +31,9 @@
     "babel-register": "^6.22.0",
     "mocha": "^3.2.0",
     "renamer": "^0.6.1",
-    "sinon": "^2.0.0-pre.4",
     "replace": "^0.3.0",
     "rimraf": "^2.6.1",
+    "sinon": "^2.0.0-pre.4",
     "webpack": "2"
   },
   "scripts": {
@@ -50,8 +50,7 @@
     "browser:build": "webpack -p",
     "browser:test:build": "webpack --output-pathinfo --config test/browser/webpack.test.config.js",
     "browser:test": "npm run browser:test:build && open ./test/browser/index.html",
-    "test": "mocha --compilers js:babel-register --require babel-polyfill",
-    "prepublish": "npm run build"
+    "test": "mocha --compilers js:babel-register --require babel-polyfill"
   },
   "babel": {
     "presets": [
