@@ -21,6 +21,7 @@
     "node-fetch": "^1.6.3",
     "qs": "^6.3.1",
     "rc": "^1.1.6",
+    "rimraf": "^2.6.1",
     "ws": "^1.1.1"
   },
   "devDependencies": {
@@ -35,7 +36,7 @@
     "webpack": "2"
   },
   "scripts": {
-    "clean": "rm -r build",
+    "clean": "rimraf build",
     "build:src": "babel -d build/src src",
     "build:bin:lib": "babel -d build/bin/lib bin/lib",
     "build:bin:tw-chat": "babel -d build bin/tw-chat*",
@@ -49,7 +50,7 @@
     "browser:test:build": "webpack --output-pathinfo --config test/browser/webpack.test.config.js",
     "browser:test": "npm run browser:test:build && open ./test/browser/index.html",
     "test": "mocha --compilers js:babel-register --require babel-polyfill",
-    "prepublish": "npm run build"
+    "preinstall": "npm run build"
   },
   "babel": {
     "presets": [
