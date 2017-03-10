@@ -15,3 +15,6 @@ The reason for the following composition is to allow us to use each product in a
 If it helps, here's an attempt at putting it in plain english:
 
 > `Teamwork` *has* each product (`Projects`, `Desk`, `Chat`) and a `TeamworkAPIClient`. Each product has it's own API client (`(Projects|Desk|Chat)APIClient`) which is provided by the `TeamworkAPIClient` from `Teamwork` (which has each product's `(Projects|Desk|Chat)APIClient`).
+
+## Models
+![](assets/structure/Models.png)
