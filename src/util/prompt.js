@@ -42,6 +42,7 @@ export class Prompt {
             this.reject = reject;
             this.resolve = resolve;
 
+            let attempt = 0;
             this.person.on("message:received", this.handler = (message) => {
                 Promise.try(this.options.validate.bind(null, message)).then(this.finalize.bind(this)).catch(err => {
                     if(attempt < this.options.maxAttempts) {
@@ -57,7 +58,6 @@ export class Prompt {
 
     finalize(value) {
         this.person.removeListener("message", this.handler);
-
         this.resolve(this.value = value);
     }
 
