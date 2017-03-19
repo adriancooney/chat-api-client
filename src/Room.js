@@ -8,6 +8,8 @@ import Message from "./Message";
 
 const debug = createDebug("tw-chat:room");
 
+const MAX_MESSAGE_RETENTION = 50;
+
 /**
  * The Room model.
  *
@@ -28,7 +30,7 @@ const debug = createDebug("tw-chat:room");
  *      "message": ({Message} message)
  *
  *          Emitted when the room receives a new message.
- *          
+ *
  */
 export default class Room extends EventEmitter {
     /** @type {Number} The room ID. */
@@ -38,7 +40,7 @@ export default class Room extends EventEmitter {
     type;
 
     /** @type {String} The room title. */
-    title;    
+    title;
 
     /** @type {String} Room status e.g. "active" */
     status;
@@ -72,15 +74,15 @@ export default class Room extends EventEmitter {
 
     /**
      * Create a new Room.
-     * 
+     *
      * @param  {APIClient}  api          Authorized APIClient instance.
      * @param  {Object}     details      Optional, room details from API.
      * @param  {Person[]}   participants Optional, list of room particpants.
-     * @return {Room}              
+     * @return {Room}
      */
     constructor(api, details, participants) {
         super();
-        
+
         this.api = api;
 
         if(details)
@@ -92,7 +94,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Update the room object.
-     * 
+     *
      * @param  {Object} details The details to update (usually API response).
      * @return {Room}           The updated room object.
      */
@@ -115,7 +117,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Update the title of the room with the API.
-     * 
+     *
      * @param  {String}     title  The new title.
      * @return {Promise<Room>}     The updated room.
      */
@@ -127,9 +129,9 @@ export default class Room extends EventEmitter {
 
     /**
      * Find a person in memory by ID.
-     * 
+     *
      * @param  {Number} id The person's ID.
-     * @return {Person} 
+     * @return {Person}
      */
     findPersonById(id) {
         return this.people.find(person => person.id === id);
@@ -137,7 +139,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Add a new person to the room.
-     * 
+     *
      * @param  {Person} person  The person to add.
      * @return {Person}         The added person.
      */
@@ -150,7 +152,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Add multiple person objects to a room.
-     * 
+     *
      * @param  {Person[]} people  Array of person objects.
      * @return {Person[]}         The added person objects.
      */
@@ -160,7 +162,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Delete a person from the room.
-     * 
+     *
      * @param  {Person} person The person to delete.
      * @return {Person[]}      The deleted person.
      */
@@ -172,7 +174,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Handle a new person to the room.
-     * 
+     *
      * @param  {Person} person The new person.
      * @return {Person}        The added person.
      */
@@ -183,7 +185,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Handle a new person to the room.
-     * 
+     *
      * @param  {Person} person The new person.
      * @return {Person}        The added person.
      */
@@ -194,7 +196,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Event Handler: When a new message is sent to the room.
-     * 
+     *
      * @param  {Message} message The new message object.
      */
     handleMessage(message) {
@@ -210,11 +212,15 @@ export default class Room extends EventEmitter {
 
     /**
      * Add a new message to the room.
-     * 
+     *
      * @param  {Message} message  The new message.
      * @return {Message}          The newly added message.
      */
     addMessage(message) {
+        if(this.messages.length >= MAX_MESSAGE_RETENTION) {
+            this.messages.shift();
+        }
+
         this.messages.push(message);
 
         return message;
@@ -222,7 +228,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Get and save messages for a room.
-     * 
+     *
      * @return {Promise<Message[]>} The message objects from the API.
      */
     getMessages() {
@@ -236,7 +242,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Save or create a message to the room.
-     * 
+     *
      * @param  {Object} rawMessage The raw message returned from the API.
      * @return {Message}           The newly created (or saved) message object.
      */
@@ -268,7 +274,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Find a message in memory by ID.
-     * 
+     *
      * @param  {Number} id  The message ID.
      * @return {Message}    The found message object.
      */
@@ -278,15 +284,15 @@ export default class Room extends EventEmitter {
 
     /**
      * Send a message to the room (or create it if uninitialized).
-     * 
+     *
      * There's an unfortunate case where this function could be used (and is, see tw-chat-message)
      * to send a message before (any or) all the rooms are loaded into memory. In that case, this
      * function will *always* create a new room for the message because it doesn't know what room
      * to send it to otherwise. The API really should know to put the message into the pair
      * conversation but it doesn't look like it does.
-     * 
+     *
      * @param  {String}  message     Message content.
-     * @return {Promise<Message>}    Resolves to the sent message.              
+     * @return {Promise<Message>}    Resolves to the sent message.
      */
     sendMessage(message) {
         message = new Message(message);
@@ -314,7 +320,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Tell the server the currently logged in user is active in this room.
-     * 
+     *
      * @return {Promse} Resolves once the frame is sent (there is no ack/fire and forget).
      */
     activate() {
@@ -323,7 +329,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Send the `typing` event as the currently logged in user to the current room.
-     * 
+     *
      * @param  {Boolean} isTyping  Whether or not the user is typing.
      * @return {Promise}           Resolves when the frame is sent (again, no ack of the frame).
      */
@@ -334,7 +340,7 @@ export default class Room extends EventEmitter {
     /**
      * Determine whether the current room instance has been initialized. "Initialized" simply
      * means has the room an ID or not.
-     * 
+     *
      * @return {Boolean}
      */
     get initialized() {
@@ -343,7 +349,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Convert the room object to useful debuggable object (`util.inspect`).
-     * 
+     *
      * @return {String}
      */
     inspect() {
@@ -352,7 +358,7 @@ export default class Room extends EventEmitter {
 
     /**
      * Serialize the room object.
-     * 
+     *
      * @return {Object}
      */
     toJSON() {

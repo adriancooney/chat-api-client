@@ -14,7 +14,7 @@ const debug = createDebug("tw-chat:person");
  * Events:
  *
  *  "updated": ({Person} person, {Object} changes)
- *  
+ *
  *      Emitted when the person object has been updated.
  *
  *  "message": ({Message} message)
@@ -31,7 +31,7 @@ const debug = createDebug("tw-chat:person");
  *
  *      Emitted when the currently logged in user receives a message from the
  *      current Person object.
- * 
+ *
  */
 export default class Person extends EventEmitter {
     /** @type {Number} The user's id. */
@@ -57,14 +57,14 @@ export default class Person extends EventEmitter {
 
     /**
      * Create a new Person object.
-     * 
+     *
      * @param  {APIClient}  api     The authorized API Client instance.
      * @param  {Object}     details Optional, the person details to pass to Person#Update.
      * @return {Person}
      */
     constructor(api, details) {
         super();
-        
+
         this.api = api;
 
         // Node warns us that this is a potential "memory leak" however it is untrue (although it may be a sign of leaks to come).
@@ -98,7 +98,7 @@ export default class Person extends EventEmitter {
 
     /**
      * Event Handler: When a room receives a message.
-     * 
+     *
      * @param  {Message} message The new message object.
      */
     onMessage(message) {
@@ -110,7 +110,7 @@ export default class Person extends EventEmitter {
 
     /**
      * Send a message to this person instance.
-     * 
+     *
      * @param  {String} message     The string message.
      * @return {Promise<Message>}   Resolves to the sent message.
      */
@@ -128,23 +128,23 @@ export default class Person extends EventEmitter {
 
     /**
      * Update the current Person object.
-     * 
+     *
      * @param  {Object} details Person details (from API).
      * @return {Person}         The current person instance.
      */
     update(details) {
-        let update = {};
+        let merged = {};
 
-        if(details.id) update.id = parseInt(details.id);
-        if(details.lastActivityAt) update.lastActivity = moment(details.lastActivityAt);
+        if(details.id) merged.id = parseInt(details.id);
+        if(details.lastActivityAt) merged.lastActivity = moment(details.lastActivityAt);
 
-        update = Object.assign(omit(details, [
+        merged = Object.assign(omit(details, [
             "lastActivityAt",
             "roomId"
-        ]), update);
+        ]), merged);
 
-        let person = Object.assign(this, update);
-        this.emit("updated", person, update);
+        let person = Object.assign(this, merged);
+        this.emit("updated", person, merged);
 
         // If we have a roomId, add it to the pair room
         if(details.roomId) {
@@ -156,7 +156,7 @@ export default class Person extends EventEmitter {
 
     /**
      * Determine if a user has been mentioned in a message.
-     * 
+     *
      * @param  {Message}  message The message object.
      * @return {Boolean}
      */
@@ -177,7 +177,7 @@ export default class Person extends EventEmitter {
 
     /**
      * Serialize the Person.
-     * 
+     *
      * @return {Object}
      */
     toJSON() {
