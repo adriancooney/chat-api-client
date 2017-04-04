@@ -1,13 +1,13 @@
 # `tw-chat`
 ## CLI
-To install:
+### Installation
 
-### Release
-~~`npm install @teamwork/tw-chat`~~ Module is not yet published.
+#### Release
+`npm install -f @teamwork/chat-almighty`
 
-### Manual install
+#### Manual install
 Clone the repository and `npm install`:
-    
+
     $ git clone https://github.com/adriancooney/chat-api-client.git
     $ cd chat-api-client/
     $ npm install
@@ -17,7 +17,7 @@ Next, build the CLI and then `npm link`:
     $ npm run build
     $ npm link
 
-### Development
+#### Development
 Clone the repository and `npm install`:
 
     $ git clone https://github.com/adriancooney/chat-api-client.git
