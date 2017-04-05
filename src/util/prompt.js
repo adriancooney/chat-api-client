@@ -1,15 +1,22 @@
-import Promise, { CancellationError } from "bluebird";
+dimport Promise, { CancellationError, TimeoutError } from "bluebird";
 
-export const MAX_PROMPT_ATTEMPTS = 3;
+export const DEFAULT_MAX_PROMPT_ATTEMPTS = 3;
+export const DEFAULT_TIMEOUT = 30 * 1000;
 
 Promise.config({ cancellation: true });
 
 const validators = {
     float: message => {
-        const input = parseFloat(message.content);
+        const { content } = message;
+
+        if(content.trim() === "infinity") {
+            throw new Error("Really? Infinity? I'm not that stupid.");
+        }
+
+        const input = parseFloat(content);
 
         if(isNaN(input)) {
-            throw new Error("Invalid input. Please provide a number.");
+            throw new Error("Sorry, I didn't understand that. Please provide a number.");
         }
 
         return input;
@@ -28,13 +35,22 @@ export class Prompt {
             input.validate = validators[input.validate];
         }
 
+        if(!input.message) {
+            throw new Error("Please provide a message for the prompt.");
+        }
+
         this.person = person;
         this.value = null;
         this.options = {
             validate: validators["default"],
-            maxAttempts: MAX_PROMPT_ATTEMPTS,
+            maxAttempts: DEFAULT_MAX_PROMPT_ATTEMPTS,
+            timeout: DEFAULT_TIMEOUT,
             ...input
         };
+    }
+
+    remind() {
+        return this.person.sendMessage(`@${this.person.handle}, friendly reminder that I'm still waiting for an answer.`);
     }
 
     run() {
@@ -44,20 +60,26 @@ export class Prompt {
 
             let attempt = 0;
             this.person.on("message:received", this.handler = (message) => {
-                Promise.try(this.options.validate.bind(null, message)).then(this.finalize.bind(this)).catch(err => {
-                    if(attempt < this.options.maxAttempts) {
-                        attempt++;
-                        return this.person.sendMessage(`${err.message} (${this.options.maxAttempts - attempt} attempts remaining)`);
-                    } else throw new Error("Max attempts reached for prompt. Exiting.");
-                }).catch(reject);
+                Promise.try(this.options.validate.bind(null, message))
+                    .then(this.finalize.bind(this))
+                    .catch(err => {
+                        if(attempt < this.options.maxAttempts) {
+                            attempt++;
+                            return this.person.sendMessage(`${err.message} (${this.options.maxAttempts - attempt + 1} attempts remaining)`);
+                        } else throw new Error("Too many attempts, sorry. I didn't understand your input.");
+                    }).catch(reject);
             });
 
-            this.person.sendMessage(this.options.message);
+            this.person.sendMessage(this.options.message).catch(reject);
+        }).timeout(this.options.timeout).tapCatch(err => {
+            if(err instanceof TimeoutError) {
+                return this.person.sendMessage(`Sorry, @${this.person.handle}, too slow.`);
+            }
         });
     }
 
     finalize(value) {
-        this.person.removeListener("message", this.handler);
+        this.person.removeListener("message:received", this.handler);
         this.resolve(this.value = value);
     }
 

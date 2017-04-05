@@ -12,7 +12,7 @@
     "build"
   ],
   "dependencies": {
-    "bluebird": "^3.4.7",
+    "bluebird": "^3.5.0",
     "colors": "^1.1.2",
     "commander": "^2.9.0",
     "debug": "^2.6.0",
@@ -37,6 +37,7 @@
     "babel-preset-es2017": "^6.22.0",
     "babel-preset-stage-0": "^6.22.0",
     "babel-register": "^6.22.0",
+    "documentation": "^4.0.0-beta.18",
     "mocha": "^3.2.0",
     "renamer": "^0.6.1",
     "replace": "^0.3.0",
