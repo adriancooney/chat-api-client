@@ -5,7 +5,6 @@ import pkg from "../package.json";
 program
     .version(pkg.version)
     .allowUnknownOption()
-    .command("bot", "manage your bot")
     .command("message", "send a message to a user")
     .command("messages", "list messages for rooms")
     .command("unseen", "get the unseen message count")
