@@ -27,7 +27,7 @@ export function getUser(target = config.user) {
     if(!user)
         throw new Error(`User "${target}" not found.`);
 
-    return [user.installation, user.username, user.password];
+    return user;
 }
 
 function saveCache(cache = {}) {
@@ -58,7 +58,7 @@ function clearCache() {
 
 function chatFromCache() {
     return loadCache().then((cache = {}) => {
-        const { 
+        const {
             user: { api: { installation, auth } },
             rooms, people
         } = cache[config.user];
@@ -66,7 +66,7 @@ function chatFromCache() {
         return TeamworkChat.fromAuth(installation, auth).tap(chat => {
             // It's not imperative if the following calls complete successfully but it
             // is imperative that we catch an errors occurring. If we don't, we leave
-            // a hanging TeamworkChat instance connected with an open socket and that's not good. 
+            // a hanging TeamworkChat instance connected with an open socket and that's not good.
             return Promise.try(() => {
                 people.forEach(chat.savePerson.bind(chat));
                 rooms.forEach(chat.saveRoom.bind(chat));
@@ -94,7 +94,11 @@ export function getChat(user) {
     return chatFromCache().catch(err => {
         debug("unable to load chat login details from auth, re-authenticating");
 
-        return TeamworkChat.fromCredentials(...getUser(user));
+        user = getUser(user);
+
+        debug("logging in with user: ", user)
+
+        return TeamworkChat.from(user);
     }).tap(chat => chatInstance = chat);
 }
 

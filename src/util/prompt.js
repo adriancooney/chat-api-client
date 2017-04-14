@@ -1,4 +1,4 @@
-dimport Promise, { CancellationError, TimeoutError } from "bluebird";
+import Promise, { CancellationError, TimeoutError } from "bluebird";
 
 export const DEFAULT_MAX_PROMPT_ATTEMPTS = 3;
 export const DEFAULT_TIMEOUT = 30 * 1000;
@@ -22,11 +22,23 @@ const validators = {
         return input;
     },
 
+    int: message => {
+        const { content } = message;
+
+        const input = parseInt(content, 10);
+
+        if(isNaN(input)) {
+            throw new Error("Sorry, I need an number please (and not a decimal).");
+        }
+
+        return input;
+    },
+
     "default": input => input
 }
 
 export class Prompt {
-    constructor(person, input) {
+    constructor(scope, input) {
         if(typeof input === "string") {
             input = { message: input };
         }
@@ -39,7 +51,7 @@ export class Prompt {
             throw new Error("Please provide a message for the prompt.");
         }
 
-        this.person = person;
+        this.scope = scope;
         this.value = null;
         this.options = {
             validate: validators["default"],
@@ -49,37 +61,33 @@ export class Prompt {
         };
     }
 
-    remind() {
-        return this.person.sendMessage(`@${this.person.handle}, friendly reminder that I'm still waiting for an answer.`);
-    }
-
     run() {
         return this.promise = new Promise((resolve, reject) => {
             this.reject = reject;
             this.resolve = resolve;
 
             let attempt = 0;
-            this.person.on("message:received", this.handler = (message) => {
+            this.scope.on("message:received", this.handler = (message) => {
                 Promise.try(this.options.validate.bind(null, message))
                     .then(this.finalize.bind(this))
                     .catch(err => {
                         if(attempt < this.options.maxAttempts) {
                             attempt++;
-                            return this.person.sendMessage(`${err.message} (${this.options.maxAttempts - attempt + 1} attempts remaining)`);
+                            return this.scope.sendMessage(`${err.message} (${this.options.maxAttempts - attempt + 1} attempts remaining)`);
                         } else throw new Error("Too many attempts, sorry. I didn't understand your input.");
                     }).catch(reject);
             });
 
-            this.person.sendMessage(this.options.message).catch(reject);
+            this.scope.sendMessage(this.options.message).catch(reject);
         }).timeout(this.options.timeout).tapCatch(err => {
             if(err instanceof TimeoutError) {
-                return this.person.sendMessage(`Sorry, @${this.person.handle}, too slow.`);
+                return this.scope.sendMessage(`Sorry, too slow.`);
             }
         });
     }
 
     finalize(value) {
-        this.person.removeListener("message:received", this.handler);
+        this.scope.removeListener("message:received", this.handler);
         this.resolve(this.value = value);
     }
 
@@ -98,6 +106,6 @@ export class Prompt {
     }
 }
 
-export default function prompt(person, input) {
-    return (new Prompt(person, input)).run();
+export default function prompt(scope, input) {
+    return (new Prompt(scope, input)).run();
 };

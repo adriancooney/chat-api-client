@@ -91,7 +91,7 @@ const RECONNECT_INTERVAL = 1000 * 3;
  *          Emitted when the APIClient has disconnected and manages to reconnect to the API.
  *          The missed information between the disconnect and reconnect is passed as parameters.
  *          A fourth parameter called `downtime` also tells you how long you disconnected from the API.
- *      
+ *
  */
 export default class TeamworkChat extends Person {
     /**
@@ -119,7 +119,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * The people currently loaded in TeamworkChat.
-     * 
+     *
      * @return {Person[]}
      */
     get people() {
@@ -189,8 +189,8 @@ export default class TeamworkChat extends Person {
             // Update the downtime
             this.monitor.downtime.add(outage);
 
-            // Note: it's okay if this call fails, we will re-attempt it in the catch. Don't 
-            // worry, it won't attempt to reconnect to the websocket again. 
+            // Note: it's okay if this call fails, we will re-attempt it in the catch. Don't
+            // worry, it won't attempt to reconnect to the websocket again.
             this.emit("reconnect", people, rooms, messages, outage);
         }).catch(error => {
             debug("unable to reconnect socket and get updates", error);
@@ -199,9 +199,9 @@ export default class TeamworkChat extends Person {
     }
 
     /**
-     * Event Handler: when the APIClient's socket recieves a `frame`. This is the handler that 
+     * Event Handler: when the APIClient's socket recieves a `frame`. This is the handler that
      * reads the incoming frame's `name` and handles it appropriately.
-     * 
+     *
      * @param  {Object} frame Parsed socket frame.
      */
     onFrame(frame) {
@@ -213,7 +213,7 @@ export default class TeamworkChat extends Person {
 
                     if(!message.roomId) {
                         throw new Error(
-                            "Malformed frame: `room.message.created` has no room ID. Unable " + 
+                            "Malformed frame: `room.message.created` has no room ID. Unable " +
                             "to direct message to correct room. Ignoring frame."
                         );
                     }
@@ -255,7 +255,7 @@ export default class TeamworkChat extends Person {
 
                         if(frame.name === "user.added") {
                             this.emit("person:created", person);
-                        } 
+                        }
                     });
                 break;
 
@@ -280,7 +280,7 @@ export default class TeamworkChat extends Person {
     /**
      * Override ability to send message to a Person object as this is an error,
      * the consumer would be attempting to send a message to themselves.
-     * 
+     *
      * @throws {Error} (Always)
      */
     sendMessage() {
@@ -289,7 +289,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Send a message to a person by their handle. See Person#sendMessage for more details.
-     * 
+     *
      * @param  {String} handle      The person's handle.
      * @param  {String} message     See Person#sendMessage for details.
      * @return {Promise<Message>}   See Person#sendMessage for returned details.
@@ -303,7 +303,7 @@ export default class TeamworkChat extends Person {
      * server side unless you provide `initialMessage`. The Chat API doesn't have an API
      * to create a room without the first message being sent. If you do not provide an
      * initialMessage, the room will be created in the first `sendMessage` request.
-     * 
+     *
      * @param  {Array<String>}  handles         The list of people's handles (without `@` symbol).
      * @param  {String}         initialMessage  Optional initialMessage to initialize the room (i.e. server side).
      * @return {Promise<Room>}                  The newly created room.
@@ -332,10 +332,10 @@ export default class TeamworkChat extends Person {
      * Things to discuss: (TODO: discuss)
      *
      * 1. Should we load all the rooms (if they're not already loaded), then attempt to find the room?
-     *    This would be similiar to how `getPersonByHandle` works. It loads all people via `people.json` 
+     *    This would be similiar to how `getPersonByHandle` works. It loads all people via `people.json`
      *    and then selects the user via their handle. This isn't ideal but it's how the Chat GUI Client
      *    works. Should we use the same logic here?
-     *    
+     *
      * @param  {Array<String>} handles The list of people's handles (without `@` symbol).
      * @return {Promise<Room>}         The room.
      */
@@ -372,7 +372,7 @@ export default class TeamworkChat extends Person {
      *    important: { rooms {Number}, conversations {Number} },
      *    total: { rooms: {Number}, conversations: {Number} }
      *  }
-     * 
+     *
      * @return {Promise<Object>} Object containing message counts.
      */
     getUnseenCount() {
@@ -396,7 +396,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Update the currently logged in user's handle.
-     * 
+     *
      * @param  {String}       handle The user's handle (without the `@`).
      * @return {TeamworkChat}        The updated user.
      */
@@ -408,7 +408,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Update the user's status.
-     * 
+     *
      * @param  {String} status See STATUS_TYPES exported from APIClient for available values.
      * @return {Promise}       Resolves once frame is sent. There is no response from the server
      *                         for this so it's fire and forget.
@@ -419,9 +419,9 @@ export default class TeamworkChat extends Person {
 
     /**
      * Find a room locally that includes the handles.
-     * 
+     *
      * @param  {Array<String>} handles  The people's handles (without `@`).
-     * @return {Room}                   The room, if any.        
+     * @return {Room}                   The room, if any.
      */
     findRoomForHandles(handles) {
         return this.rooms.find(room => {
@@ -431,7 +431,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Add a room to TeamworkChat and emit the appropriate events.
-     * 
+     *
      * @param {Room} room The room object.
      */
     addRoom(room) {
@@ -453,7 +453,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Add multiple rooms.
-     * 
+     *
      * @param {Room[]} rooms
      */
     addRooms(rooms) {
@@ -463,7 +463,7 @@ export default class TeamworkChat extends Person {
     /**
      * Save the room data from the API response to the appropriate room or create a new
      * room and add it if it does not exist.
-     * 
+     *
      * @param  {Object} rawRoom The room returned from the API.
      * @return {Room}           The saved or created room.
      */
@@ -504,7 +504,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Find a room by ID locally.
-     * 
+     *
      * @param  {Number} id The room's id.
      * @return {Room}
      */
@@ -514,7 +514,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Find a room in memory by title.
-     * 
+     *
      * @param  {String|RegExp} title The exact title of the room or regex.
      * @return {Room}                The room, if any.
      */
@@ -531,7 +531,7 @@ export default class TeamworkChat extends Person {
     /**
      * Get a room by ID. This attempts to find it in memory, if it does not exist,
      * it is loaded from the server and saved.
-     * 
+     *
      * @param  {Number}     id          The room ID.
      * @param  {Boolean}    cached      Optional, pick from the cache if room exists (default: true).
      * @return {Promise<Room>}          Resolves to the requested room.
@@ -546,7 +546,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Get a room by it's title.
-     * 
+     *
      * @param  {String|RegExp} title The exact room title or a regex.
      * @return {Room}                The room, if any.
      */
@@ -591,9 +591,9 @@ export default class TeamworkChat extends Person {
     }
 
     /**
-     * Get all the rooms from the API and save in memory. WARNING: This makes a lot of API 
+     * Get all the rooms from the API and save in memory. WARNING: This makes a lot of API
      * calls if there is a lot of rooms so use sparingly. It is intentionally slow.
-     * 
+     *
      * @param  {Object} filter   The filter to pass to APIClient#getRooms.
      * @return {Promise<Room[]>} The list of rooms.
      */
@@ -612,7 +612,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Find a person in memory.
-     * 
+     *
      * @param  {Number} id The person's ID.
      * @return {Person}
      */
@@ -622,7 +622,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Get a person by ID and save them.
-     * 
+     *
      * @param  {Number}  id     The person's ID.
      * @param  {Boolean} cached Whether or not to search cache first.
      * @return {Promise<Person>}
@@ -636,10 +636,10 @@ export default class TeamworkChat extends Person {
     }
 
     /**
-     * Find a person by a specific property. WARNING: If the person is not found in memory, 
+     * Find a person by a specific property. WARNING: If the person is not found in memory,
      * `getAllPeople` is called and ALL PEOPLE are loaded from the API. The requested user is
      * then plucked from the returned values.
-     * 
+     *
      * @param  {String} property The Person object's property to compare e.g. "id"
      * @param  {String} value    The value to compare Person[property]. If it matches, the person object is returned.
      * @return {Promise<Person>} The found person object.
@@ -672,7 +672,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Find or get a user by handle and save them.
-     * 
+     *
      * @param  {String} handle  The user's handle (without `@`)
      * @return {Promise<Person>}
      */
@@ -694,7 +694,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Get all available people and save them.
-     * 
+     *
      * @return {Promise<Person[]>}
      */
     getAllPeople(filter) {
@@ -703,7 +703,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Save or create a person's data from the API.
-     * 
+     *
      * @param  {Object} rawPerson The person object from the API.
      * @return {Person}           The updated person.
      */
@@ -721,7 +721,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Add a person to global room.
-     * 
+     *
      * @param {Person} person
      */
     addPerson(person) {
@@ -735,7 +735,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Add multiple person objects at once.
-     * 
+     *
      * @param {Array<Person>} people
      */
     addPeople(people) {
@@ -744,7 +744,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Get messages for user since now and `since`.
-     * 
+     *
      * @param  {Object} filter          Object containing filters.
      * @param  {Number} page            The message page (default: 1)
      * @param  {Number} pageSize        The amount of messages to return (default: 50)
@@ -760,9 +760,9 @@ export default class TeamworkChat extends Person {
 
     /**
      * Get all messages for a user since a specific timestamp.
-     * 
+     *
      * @param  {Object} filter          Object containing filters. See #getMessages.
-     * @return {Promise<Message[]>}     The retrieved messages.     
+     * @return {Promise<Message[]>}     The retrieved messages.
      */
     getAllMessages(filter) {
         return this.getMessages(filter).then(messages => {
@@ -775,14 +775,14 @@ export default class TeamworkChat extends Person {
     /**
      * Impersonate a person and return an authenticated TeamworkChat instance. This means you
      * are logged in as that person. For testing purposes only.
-     * 
+     *
      * Remember: these are SEPERATE instances so they all managed rooms and rooms in
      * memory themselves and do not communicate with each other! This means different
      * TeamworkChat instances DO NOT INTEROPERATE.
-     * 
+     *
      * Careful: Users may not be participating in the same rooms so they may not
      * be able to send messages to certain rooms! 404's will be returned.
-     * 
+     *
      * @param  {Person}             person The person to impersonate.
      * @return {Promise<TeamworkChat>}     The impersonated person.
      */
@@ -797,7 +797,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Impersonate a person by their handle.
-     * 
+     *
      * @param  {String}                 handle The user's handle.
      * @return {Promise<TeamworkChat>}         The impersonated person.
      */
@@ -809,7 +809,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Revert the impersonation.
-     * 
+     *
      * @return {Promise} Resolves when impersonation revert request completes.
      */
     unimpersonate() {
@@ -818,7 +818,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Get updates since a specific timestamp.
-     * 
+     *
      * @param  {moment} since  The moment timestamp to get updates since.
      * @return {Promise<[]>}   Resolves to an array of [people, rooms, messages].
      */
@@ -838,7 +838,7 @@ export default class TeamworkChat extends Person {
      * Override parent method and remove `api` key from details. This can
      * happen if we happen to serialize this person (i.e. TeamworkChat) and
      * then attempt to `addPerson`, it would override our API instance.
-     * 
+     *
      * @override
      */
     update(details) {
@@ -847,7 +847,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Logout the from the API and close the connection.
-     * 
+     *
      * @return {Promise} Resolves once logged out.
      */
     logout() {
@@ -861,7 +861,7 @@ export default class TeamworkChat extends Person {
      */
     close() {
         // Don't attempt to close the socket a second time
-        if(this.forceClosed) 
+        if(this.forceClosed)
             return;
 
         debug("closing TeamworkChat connection");
@@ -871,7 +871,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Connect or reconnect a closed socket (i.e. after calling `.close`).
-     * 
+     *
      * @return {[type]} [description]
      */
     connect() {
@@ -909,7 +909,7 @@ export default class TeamworkChat extends Person {
     /**
      * Serialize the current user to JSON but include the API details. Don't forget, this is also
      * a Person object.
-     * 
+     *
      * @return {Object}
      */
     toJSON() {
@@ -921,8 +921,8 @@ export default class TeamworkChat extends Person {
 
     /**
      * Convert the TeamworkChat to a useful debug string for `util.inspect`.
-     * 
-     * @return {String} 
+     *
+     * @return {String}
      */
     inspect() {
         return `Person{id = ${this.id}, current user, ${inspect(this.api)}}`;
@@ -932,9 +932,9 @@ export default class TeamworkChat extends Person {
      * Login to the Teamwork Chat API, open a socket to the chat-server and complete
      * the authentication flow. The API Client takes care of pings and disconnection
      * so all you need to worry about is closing the instance via `close` when you are
-     * done. Otherwise, you can use `withCredentials` to automatically clean up and 
+     * done. Otherwise, you can use `withCredentials` to automatically clean up and
      * log the user out when complete (recommended). See TeamworkChat.withCredentials.
-     * 
+     *
      * @param  {String|Object}  installation  The installation URL.
      * @param  {String}         username      The username used to login to Teamwork.
      * @param  {String}         password      The password used to login to Teamwork (disposed after initial login request).
@@ -954,7 +954,7 @@ export default class TeamworkChat extends Person {
      * outcome -- rejection or resolving), the `disposer` function is called and the socket to Chat is
      * closed. This allows the process to exit appropriately and ensures any open sockets are closed.
      * This will also *log the user out* when complete rendering the `tw-auth` token is useless.
-     * 
+     *
      * @param  {String|Object}  installation The installation URL.
      * @param  {String}         username     The username used to login to Teamwork.
      * @param  {String}         password     The password used to login to Teamwork (disposed after initial login request).
@@ -970,7 +970,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Similar to `TeamworkChat.fromCredentials` except using a pre-existing auth key.
-     * 
+     *
      * @param  {String|Object}  installation The installation URL.
      * @param  {String}         auth         The user's auth key.
      * @return {Promise<TeamworkChat>}       An authorized and fully connected TeamworkChat instance.
@@ -983,7 +983,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * The very same functionality as `TeamworkChat.withCredentials` except using an auth key.
-     * 
+     *
      * @param  {String|Object}  installation The installation URL.
      * @param  {String}         auth         The user's auth key.
      * @param  {Function}       callback     The callback (!) that has param `chat` TeamworkChat instance. This returns
@@ -998,7 +998,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Similar to `TeamworkChat.fromCredentials` except using a Projects API key.
-     * 
+     *
      * @param  {String|Object}  installation The installation URL.
      * @param  {String}         key          The user's Projects "API Key".
      * @return {Promise<TeamworkChat>}       An authorized and fully connected TeamworkChat instance.
@@ -1011,7 +1011,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * The very same functionality as `TeamworkChat.withCredentials` except using a Projects API key.
-     * 
+     *
      * @param  {String|Object}  installation The installation URL.
      * @param  {String}         key          The user's Projects "API Key".
      * @param  {Function}       callback     The callback (!) that has param `chat` TeamworkChat instance. This returns
@@ -1022,5 +1022,20 @@ export default class TeamworkChat extends Person {
         return Promise.using(TeamworkChat.fromKey(installation, key).disposer(chat => {
             return chat.logout();
         }), callback);
+    }
+
+    static from(details = {}) {
+        if(!details.installation)
+            throw new Error("Installation must be provided.");
+
+        if(details.auth) {
+            return TeamworkChat.fromAuth(details.installation, details.auth);
+        } else if(details.key) {
+            return TeamworkChat.fromKey(details.installation, details.key);
+        } else if(details.username && details.password) {
+            return TeamworkChat.fromCredentials(details.installation, details.username, details.password);
+        } else {
+            throw new Error("Unknown login details.");
+        }
     }
 }

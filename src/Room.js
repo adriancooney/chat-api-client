@@ -31,6 +31,11 @@ const MAX_MESSAGE_RETENTION = 50;
  *
  *          Emitted when the room receives a new message.
  *
+ *      "message:received": ({Message} message)
+ *
+ *          Emitted when a room receives a message that is not from the
+ *          currently logged in user.
+ *
  */
 export default class Room extends EventEmitter {
     /** @type {Number} The room ID. */
@@ -203,6 +208,10 @@ export default class Room extends EventEmitter {
         message = this.saveMessage(message);
 
         this.emit("message", message);
+
+        if(message.author !== this.api.user) {
+            this.emit("message:received", message);
+        }
 
         // Handle mentions
         if(this.api.user.isMentioned(message)) {

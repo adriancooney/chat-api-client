@@ -7,7 +7,7 @@ import WebSocket from "ws";
 import fetch from "node-fetch";
 import Promise, { CancellationError, TimeoutError } from "bluebird";
 import { green, blue } from "colors";
-import { 
+import {
     without,
     omit,
     size,
@@ -22,7 +22,7 @@ const debug = createDebug("tw-chat:api");
 
 /**
  * The time in ms between pings.
- * 
+ *
  * @type {Number}
  */
 const PING_INTERVAL = 10000;
@@ -32,7 +32,7 @@ const PING_INTERVAL = 10000;
  * something isn't right" and it assumes the connection is broken then
  * forcefully disconnects the socket from the server (it does not wait until
  * the `readyState` is `WebSocket.CLOSED` that is, it's really slow).
- * 
+ *
  * @type {Number}
  */
 const PING_MAX_ATTEMPT = 3;
@@ -54,7 +54,7 @@ const PING_TIMEOUT = 3000;
 
 /**
  * The legal values for updating user status with `updateStatus`.
- * 
+ *
  * @type {Array}
  */
 export const STATUS_TYPES = ["idle", "active"];
@@ -80,25 +80,25 @@ let NONCE = 0;
  *
  *          Emitted when the client successfully connects to the API socket. This is
  *          emitted after authentication was successful.
- *          
+ *
  *      "message": ({String} message)
  *
  *          Emitted when the client recieves a "message" from the server.
- *      
+ *
  *      "frame": ({Object} frame)
  *
  *          Emitted when the client recieves a "message" from the server and the contents
  *          of the message is parsed.
- *          
+ *
  *      "close":
  *
  *          Emitted when the connection to the server closes.
- *          
+ *
  *      "error": ({Error} error)
  *
  *          Emitted when an error occurs within the API client (usually in the underlying
  *          Websocket).
- *          
+ *
  */
 export default class APIClient extends EventEmitter {
     /** @type {Function} The implementation of the WebSocket class */
@@ -106,7 +106,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * The filters waiting to be matches to frames.
-     * 
+     *
      * @type {Array<Object>}
      */
     awaiting = [];
@@ -119,21 +119,21 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Create an authorized APIClient object.
-     * 
+     *
      * @param  {String} installation The user's installation.
      * @param  {String} auth         The `tw-auth` token.
      * @return {APIClient}           The authorized APIClient instance.
      */
     constructor(installation, auth) {
         super();
-        
+
         this.installation = installation;
         this.auth = auth;
     }
 
     /**
      * Send a raw object down the socket.
-     * 
+     *
      * @param  {Object|String}          frame The object (will be serialized) or string.
      * @return {Promise<Object|String>}       The frame object (or string) sent.
      */
@@ -153,7 +153,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Send a frame down the socket to the server.
-     * 
+     *
      * @param  {String} name        The type of the frame. See APICLient.createFrame.
      * @param  {Any}    contents    The contents of the frame.
      * @return {Promise<Object>}    Resolves the raw packet object sent down the line.
@@ -165,7 +165,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Await a frame given a filter.
-     * 
+     *
      * @param  {Object} filter      A filter supplied to APIClient.matchFrame.
      * @param  {Number} timeout     The number in ms before timing out (defaults 30s).
      * @return {Promise<Object>}    Resolves to the raw object packet returned from the server.
@@ -184,7 +184,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Await multiple packets and pick (resolve) the first.
-     * 
+     *
      * @param  {...Object} filters  Filters applied to APIClient#awaitFrame.
      * @return {Promise<Object>}    Resolves to the raw object packet returned from the server.
      */
@@ -206,7 +206,7 @@ export default class APIClient extends EventEmitter {
     /**
      * Send a request down the socket. A "request" is a frame that receives a response (i.e.
      * matching nonces).
-     * 
+     *
      * @param  {String} type        The type of the frame. See APICLient.createFrame.
      * @param  {Object} frame       The contents of the frame. See APICLient#createFrame.
      * @param  {Number} timeout     The number of ms before timing out the request.
@@ -223,7 +223,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Event Handler: when the client's websocket emits "error"
-     * 
+     *
      * @param  {Error} error
      */
     onSocketError(error) {
@@ -233,7 +233,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Event Handler: when the client's websocket emits "message"
-     * 
+     *
      * @param  {String} message Raw frame string returned from server.
      */
     onSocketMessage(message) {
@@ -262,25 +262,46 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
-     * Initialize (but not connect) the API account. This sets up all non-websocket related things.
-     * 
-     * @return {Object} User account returned from API.
+     * Complete the authentication flow with Teamwork Chat.
+     *
+     * @param  {Object} user The user `account` object returned from GET /me.json.
+     * @return {Promise} Resolves when authentication is completed successfully.
      */
-    initialize() {
-         // Get the user's profile. If this fails, it means our token is invalid and the connection will fail.
-        return this.getProfile().then(res => {
-            // Save the logged in user's account to `user`;
-            return this.user = res.account;
+    authenticate(user) {
+        return this.awaitFrame("authentication.request").then(() => {
+            return this.sendFrame("authentication.response", {
+                authKey: user.authkey,
+                userId: parseInt(user.id),
+                installationDomain: user.url,
+                installationId: parseInt(user.installationId),
+                clientVersion: pkg.version
+            });
+        }).then(() => {
+            // Race the error or confirmation frames.
+            return this.raceFrames("authentication.error", "authentication.confirmation");
+        }).then(frame => {
+            if(frame.name === "authentication.error") {
+                throw new Error(frame.contents);
+            }
+
+            // Start the pinging
+            this.nextPing();
+
+            return null;
         });
     }
 
     /**
      * Connect to the Chat socket server.
-     * 
+     *
+     * @param  {boolean} authenticate Whether or not to automatically authenticate with the server.
      * @return {Promise<APIClient>} Resolves when the server has successfully completed authentication.
      */
-    connect() {
-        return this.initialize().then(user => {
+    connect(authenticate = true) {
+        return this.getProfile().then(res => {
+            // Save the logged in user's account to `user`;
+            this.user = res.account;
+
             return new Promise((resolve, reject) => {
                 const { hostname } = url.parse(this.installation);
                 const env = hostname.match(/teamwork.com/) ? "production" : "development"
@@ -312,52 +333,48 @@ export default class APIClient extends EventEmitter {
 
                 // The authentication flow.
                 this.socket.on("open", () => {
-                    // Wait for the authentication request frame and send back the auth frame.
-                    this.awaitFrame("authentication.request").then(message => {
-                        return this.sendFrame("authentication.response", {
-                            authKey: this.user.authkey,
-                            userId: parseInt(this.user.id),
-                            installationDomain: this.user.url,
-                            installationId: parseInt(this.user.installationId),
-                            clientVersion: pkg.version
-                        });
-                    }).then(() => {
-                        // Race the error or confirmation frames.
-                        return this.raceFrames("authentication.error", "authentication.confirmation");
-                    }).then(frame => {
-                        if(frame.name === "authentication.error") {
-                            throw new Error(frame.contents);
-                        }
+                    // Remove the "error" handler.
+                    this.socket.removeListener("error", reject);
 
-                        // Start the pinging to ensure our socket doesn't get disconnected for inactivity,
-                        // and to monitor our connection.
-                        this.nextPing();
+                    // Remove the "error" handler and replace it with the `onSocketError`.
+                    this.socket.on("error", this.onSocketError.bind(this));
+                    this.socket.on("close", this.onSocketClose.bind(this));
 
-                        // Remove the "error" handler and replace it with the `onSocketError`.
-                        this.socket.removeListener("error", reject);
-                        this.socket.on("error", this.onSocketError.bind(this));
-                        this.socket.on("close", this.onSocketClose.bind(this));
-
-                        resolve(this);
-
-                        this.emit("connected");
-
-                        // Silence "created promised without returning" errors
-                        return null;
-                    }).catch(reject);
+                    // Resolve when the socket opens
+                    resolve(this.socket);
                 });
             });
+        }).then(() => {
+            if(authenticate) {
+                return this.authenticate(this.user);
+            }
+        }).then(() => {
+            this.emit("connected");
+
+            return this;
         });
+    }
+
+    /**
+     * Start pinging the server.
+     */
+    startPing() {
+        this.pinging = true;
+        this.nextPing();
     }
 
     /**
      * Start sending ping frames (not Websocket pings) down the socket to ensure the server doesn't cut
      * our connection. This STARTS the pinging and will resolve when you stop the pinging with `stopPing`.
-     * 
+     *
      * @param  {Number} attempt PRIVATE: The number used to track which attempt were on, do not use.
      * @return {Promise}        A promise that resolves when `stopPing` is called.
      */
     nextPing(attempt = 0) {
+        if(!this.pinging) {
+            return Promise.resolve();
+        }
+
         return new Promise((resolve, reject) => {
             debug("attempting ping");
 
@@ -397,20 +414,23 @@ export default class APIClient extends EventEmitter {
      * Stop sending the ping frames to the server.
      */
     stopPing() {
+        this.pinging = false;
+
         if(this._nextPingReject) {
             debug("stopping ping");
             this._nextPingReject(new CancellationError());
+            delete this._nextPingReject;
         }
     }
 
     /**
      * Close the socket connection to the server. This IMMEDIATELY calls `onSocketClose`
-     * i.e. the `close` event. It doesn't wait for the underlying socket to close it's 
+     * i.e. the `close` event. It doesn't wait for the underlying socket to close it's
      * connection to the server because it is SLOW.
      */
     close() {
         // Closing a socket takes a while so to speed up the process, we
-        // manually call `onSocketClose` and remove the original `close` event 
+        // manually call `onSocketClose` and remove the original `close` event
         // handler from the socket that would also call it from the socket.
         // It still closes gracefully but we don't care when it does.
         this.socket.removeAllListeners("close");
@@ -423,7 +443,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Test if socket is connected to server.
-     * 
+     *
      * @return {Boolean} connected or not.
      */
     get connected() {
@@ -432,7 +452,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Socket Event: "room.message.created" - Send (or create) a message to a room.
-     * 
+     *
      * @param  {Room}       room    The target room to recieve the message.
      * @param  {Message}    message The message to send.
      * @return {Promise<Object>}    The raw response frame returned from the server.
@@ -446,7 +466,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Update the currently logged in user's status.
-     * 
+     *
      * @param {String} status One of: "idle"|"active"
      */
     updateStatus(status) {
@@ -458,7 +478,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Get the unseen counts from the server.
-     * 
+     *
      * @return {Promise<Object>} Resolves to the unseen counts frame from the socket server.
      */
     getUnseenCount() {
@@ -469,7 +489,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Send the `room.user.active` frame for a room.This frame has no response, it's fire and forget.
-     * 
+     *
      * @param  {Number} room        The room ID to send the room active frame for.
      * @return {Promise<Object>}    Resolves to the sent frame.
      */
@@ -482,7 +502,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Send the `room.typing` frame for a room. This frame has no response, it's fire and forget.
-     * 
+     *
      * @param  {Boolean} isTyping Whether typing or not.
      * @param  {Number}  room     The room ID.
      * @return {Promise<Object>}    Resolves to the sent frame.
@@ -497,7 +517,7 @@ export default class APIClient extends EventEmitter {
     /**
      * Send a ping frame to the server. This socket request times out after
      * PING_TIMEOUT and rejects the promise.
-     * 
+     *
      * @param  {Number}         timeout The timeout before the socket request times out. Default: PING_TIMEOUT
      * @return {Promise<Object>}        Resolves to the recieved ping frame.
      */
@@ -507,12 +527,12 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Make an *unauthenticated* request to the Teamwork API.
-     * 
+     *
      * @param  {String}  target              The fully qualified URL to fetch.
-     * @param  {Object}  options             See Fetch API `fetch` options. 
+     * @param  {Object}  options             See Fetch API `fetch` options.
      * @param  {Boolean} options.raw         Whether or not to return the raw response object.
      * @param  {Object}  options.query       An object that's stringified as the URL's query parameters (see `qs` module).
-     * @return {Promise<Object|Response>}    Raw Response object or parsed JSON response. 
+     * @return {Promise<Object|Response>}    Raw Response object or parsed JSON response.
      */
     static request(target, options = { raw: false }) {
         // Default to JSON stringify body.
@@ -527,7 +547,7 @@ export default class APIClient extends EventEmitter {
         if(options.query && size(options.query)) {
             if(target.includes("?")) {
                 throw new Error(
-                    `URL target "${target}" already contains query elements. ` + 
+                    `URL target "${target}" already contains query elements. ` +
                     `Please use the query property of the options exclusively.`
                 );
             }
@@ -561,7 +581,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Make an unauthenticated request for a list of items from the server with offset and limit.
-     * 
+     *
      * @param  {String}    target          The URL target. See APIClient.request.
      * @param  {Object}    options         The options object passed to APIClient.request.
      * @param  {Number}    options.offset  The cursor offset.
@@ -571,7 +591,7 @@ export default class APIClient extends EventEmitter {
     static requestList(target, { offset, limit, ...options } = {}) {
         return APIClient.request(target, {
             ...options,
-            query: { 
+            query: {
                 ...options.query,
                 page: omitBy({ offset, limit }, isUndefined)
             }
@@ -597,7 +617,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Make an authenticated request for a list of items from the server with offset and limit.
-     * 
+     *
      * @param  {String}    target          The URL target. See APIClient.request.
      * @param  {Object}    options         The options object passed to APIClient.requestList.
      * @return {Promise<Response|Object>}  See APIClient.request return value.
@@ -608,12 +628,12 @@ export default class APIClient extends EventEmitter {
 
     /**
      * GET /chat/me.json - Return the currently logged in user's account.
-     * 
+     *
      * @return {Promise<Object>} User's account details. See Teamwork API Docs.
      */
     getProfile() {
-        return this.request("/chat/me.json", { 
-            query: { includeAuth: true } 
+        return this.request("/chat/me.json", {
+            query: { includeAuth: true }
         });
     }
 
@@ -640,7 +660,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * GET /chat/people/<id>.json - Get a person by ID.
-     * 
+     *
      * @param  {Number}         id  The person's ID.
      * @return {Promise<Object>}    Person object response.
      */
@@ -650,7 +670,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * PUT /chat/people/<id>.json - Update a persons details.
-     * 
+     *
      * @param  {Number}          id     The person's ID.
      * @param  {Object}          update The update object.
      * @return {Promise<Object>}        The API response object.
@@ -664,7 +684,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * POST /chat/v2/rooms.json - Create a new room with handles and an initial message.
-     * 
+     *
      * @param  {Array<String>}  handles  Array of user handles (without `@` symbol).
      * @param  {String}         message  The initial message for the new room.
      * @return {Promise<Object>}         The server response with the room ID.
@@ -685,7 +705,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * DELETE /chat/room/<room>.json - Delete a room.
-     * 
+     *
      * @param  {Number} room The room ID.
      * @return {Promise}     Resolves when the room is deleted.
      */
@@ -701,7 +721,7 @@ export default class APIClient extends EventEmitter {
      * This could be a generic "update" room method but one: there are only
      * two ways a conversation details and two: the methods are vastly
      * different.
-     * 
+     *
      * @param  {Number} room   The room ID to update.
      * @param  {String} title  The room title.
      * @return {Promise}       Resolves when update is complete.
@@ -709,15 +729,15 @@ export default class APIClient extends EventEmitter {
     updateRoomTitle(room, title) {
         return this.request(`/chat/v2/conversations/${room}.json`, {
             method: "PUT",
-            body: { 
-                conversation: { title } 
+            body: {
+                conversation: { title }
             }
         })
     }
 
     /**
      * GET /chat/v2/rooms/<room>.json - Get a room from the server.
-     * 
+     *
      * @param  {Number}          room                   The room ID.
      * @param  {Object}          filter                 Filter returned results.
      * @param  {Boolean}         filter.includeUsers    Include user data in returned results.
@@ -768,9 +788,9 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
-     * Get a logged in user's messages (without room). 
+     * Get a logged in user's messages (without room).
      *
-     * Note: Unfortunately, this doesn't follow the other pagination schema so you're 
+     * Note: Unfortunately, this doesn't follow the other pagination schema so you're
      * on your own with regards to iterating the pages and the like.
      *
      * @param  {Object} filter          Object containing filters.
@@ -790,7 +810,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * GET /chat/v2/rooms/<room>/messages.json - Get messages for a room.
-     *  
+     *
      * @param  {Number} room The room ID.
      * @return {Object}      The messages return from the API.
      */
@@ -803,7 +823,7 @@ export default class APIClient extends EventEmitter {
      *
      * TODO: Move this to it's own Projects API Client Mixin.
      * TODO: Discuss this, ethically.
-     * 
+     *
      * @param  {Number}     person  The person's ID.
      * @param  {Boolean}    revert  Revert an ongoing impersonation. Don't use this however, use `unimpersonate`. The
      *                              logic for reverting the impersonation is so close to creating the impersonation,
@@ -812,7 +832,7 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<String>}    Resolves to the user's `tw-auth` cookie.
      */
     impersonate(person, revert = false) {
-        return this.request(`/people/${revert ? "" : person + "/"}impersonate${revert ? "/revert" : ""}.json`, { 
+        return this.request(`/people/${revert ? "" : person + "/"}impersonate${revert ? "/revert" : ""}.json`, {
             raw: true,
             method: "PUT"
         }).then(res => {
@@ -835,7 +855,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * DELETE /launchpad/v1/logout.json - Logout from Teamwork.
-     * 
+     *
      * @return {Promise<Object>} Value returned from server.
      */
     logout() {
@@ -844,7 +864,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * GET authenticate.teamwork.com/launchpad/v1/accounts.json - Return a user's accounts.
-     * 
+     *
      * @param  {String} username    The user's username.
      * @param  {String} password    The user's password.
      * @return {Promise<Object>}    Returns list of user's accounts. See Teamwork API Docs.
@@ -861,7 +881,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * POST <installation>/launchpad/v1/login.json - Login to Teamwork with credentials.
-     * 
+     *
      * @param  {String}  installation   The user's installation hostname.
      * @param  {String}  username       The user's username.
      * @param  {String}  password       The user's password.
@@ -891,7 +911,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Login and connect to the chat server.
-     * 
+     *
      * @param  {String|Object}  installation The user's installation.
      * @param  {String}         username     The user's username.
      * @param  {String}         password     The user's password.
@@ -909,7 +929,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Login with a pre-existing auth key.
-     * 
+     *
      * @param  {String|Object}  installation  The user's installation.
      * @param  {String}         auth          The user's auth key (this will fail if the auth key is invalid or expired).
      * @return {Promise<APIClient>}           Resolves to a new instance of APIClient that can make authenticated requests
@@ -926,7 +946,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Login with a Projects "API Key".
-     * 
+     *
      * @param  {String} installation The user's installation.
      * @param  {String} key          The "API Key".
      * @return {Promise<APIClient>}  Resolves to an authenticated APIClient instance.
@@ -938,7 +958,7 @@ export default class APIClient extends EventEmitter {
 
     /**
      * Create a frame to send to the socket server.
-     * 
+     *
      * @param  {String}     type     The frame type or identifier.
      * @param  {Any}        contents The contents of the frame.
      * @param  {Boolean}    nonced   Whether or not to nonce the frame.
@@ -966,26 +986,42 @@ export default class APIClient extends EventEmitter {
      *     Chat socket frames. The filter objects can contain various properties
      *     that dictate how we match that frame. The follow properties are supported:
      *
-     *          "type"      {String}    Match the exact frame type.
+     *          "type"      {String}    Match the exact frame type. Exception: "*", matches
+     *          "type"      {RegExp}    Match the frame name by regex.
      *          "nonce"     {Number}    Match the exact nonce of the frame.
      *          "contents"  {Object}    Deep equal contents object.
      *
      *     Fitlers can also be specified in shorthand:
      *      - If the filter is a string, it is converted to a `{ type: <filter> }` object.
-     *      
+     *      - "*" matches all frames.
+     *
      * @param  {Object|String}  fitlers     See "Filters" section above.
      * @param  {Object}         frame       The raw frame packet returned from the server.
      * @return {Boolean}                    Whether or not the filter matches the frame.
      */
     static matchFrame(filter, frame) {
-        if(typeof filter === "string")
+        if(typeof filter === "string") {
+            // Special case, "*" matches all frames
+            if(filter === "*") {
+                return true;
+            }
+
             filter = { type: filter };
+        }
+
+        if(typeof filter !== "object") {
+            throw new Error(`Invalid filter input: ${filter}`);
+        }
 
         let matches = [];
 
         if(filter.type && typeof filter.type === "string") {
             matches.push(filter.type === frame.name);
-        } 
+        }
+
+        if(filter.type && typeof filter.type instanceof RegExp) {
+            matches.push(frame.name.match(filter.type));
+        }
 
         if(filter.nonce) {
             matches.push(filter.nonce === frame.nonce);
@@ -1003,8 +1039,8 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
-     * Conver an installation input (object or string) to a string.
-     * 
+     * Convert an installation input (object or string) to a string.
+     *
      * @param  {Object|String} installation The installation descriptor.
      * @return {String}                     The installation URL.
      */
@@ -1039,7 +1075,7 @@ export default class APIClient extends EventEmitter {
      *      newChat.connect().then(chat => {
      *          // Connected chat!
      *      });
-     *      
+     *
      * @return {Object} Serialized TeamworkChat.
      */
     toJSON() {
