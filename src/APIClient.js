@@ -238,18 +238,23 @@ export default class APIClient extends EventEmitter {
      */
     onSocketMessage(message) {
         debug("incoming frame", message);
-        const frame = JSON.parse(message);
 
-        if(this.awaiting.length) {
-            this.awaiting.slice().forEach(filter => {
-                if(APIClient.matchFrame(filter.filter, frame)) {
-                    filter.resolve(frame);
-                }
-            });
+        try {
+            const frame = JSON.parse(message);
+
+            if(this.awaiting.length) {
+                this.awaiting.slice().forEach(filter => {
+                    if(APIClient.matchFrame(filter.filter, frame)) {
+                        filter.resolve(frame);
+                    }
+                });
+            }
+
+            this.emit("message", message);
+            this.emit("frame", frame);
+        } catch(err) {
+            this.emit("error", Object.assign(new Error(`Error parsing frame`), { frame }));
         }
-
-        this.emit("message", message);
-        this.emit("frame", frame);
     }
 
     /**
@@ -258,6 +263,12 @@ export default class APIClient extends EventEmitter {
     onSocketClose() {
         debug("socket closed");
         this.stopPing();
+
+        // Reject any awaiting frames
+        if(this.awaiting.length) {
+            this.awaiting.forEach(({ reject }) => reject(new Error("Socket closed.")));
+        }
+
         this.emit("close");
     }
 
@@ -300,7 +311,9 @@ export default class APIClient extends EventEmitter {
     connect(authenticate = true) {
         return this.getProfile().then(res => {
             // Save the logged in user's account to `user`;
-            this.user = res.account;
+            this.user = Object.assign(res.account, {
+                id: parseInt(res.account.id)
+            });
 
             return new Promise((resolve, reject) => {
                 const { hostname } = url.parse(this.installation);
@@ -467,6 +480,9 @@ export default class APIClient extends EventEmitter {
     /**
      * Update the currently logged in user's status.
      *
+     * We can't wait for a response here because a response is only
+     * returned if the user status *changes*.
+     *
      * @param {String} status One of: "idle"|"active"
      */
     updateStatus(status) {
@@ -488,29 +504,48 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
-     * Send the `room.user.active` frame for a room.This frame has no response, it's fire and forget.
+     * Send the `room.user.active` frame for a room. This will resolve when we receive a
+     * response from the server with the same contents sent.
      *
      * @param  {Number} room        The room ID to send the room active frame for.
-     * @return {Promise<Object>}    Resolves to the sent frame.
+     * @return {Promise<Object>}    Resolves to the response frame.
      */
     activateRoom(room) {
+        const timestamp = (new Date()).toJSON();
         return this.sendFrame("room.user.active", {
             roomId: room,
-            date: new Date()
-        });
+            date: timestamp
+        }).then(() => {
+            return this.awaitFrame({
+                type: "room.user.active",
+                contents: {
+                    roomId: room,
+                    activeAt: timestamp
+                }
+            });
+        })
     }
 
     /**
-     * Send the `room.typing` frame for a room. This frame has no response, it's fire and forget.
+     * Send the `room.typing` frame for a room. This frame awaits the reponse frame.
      *
-     * @param  {Boolean} isTyping Whether typing or not.
-     * @param  {Number}  room     The room ID.
+     * @param  {Number}  room       The room ID.
+     * @param  {Boolean} isTyping   Whether typing or not (default: true)
      * @return {Promise<Object>}    Resolves to the sent frame.
      */
-    typing(isTyping, room) {
+    typing(room, isTyping = true) {
         return this.sendFrame("room.typing", {
-            isTyping: status,
+            isTyping,
             roomId: room
+        }).then(() => {
+            return this.awaitFrame({
+                type: "room.typing",
+                contents: {
+                    userId: this.user.id,
+                    roomId: room,
+                    isTyping
+                }
+            });
         });
     }
 
