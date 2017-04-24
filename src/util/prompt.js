@@ -38,7 +38,7 @@ const validators = {
 }
 
 export class Prompt {
-    constructor(scope, input) {
+    constructor(target, input) {
         if(typeof input === "string") {
             input = { message: input };
         }
@@ -51,52 +51,78 @@ export class Prompt {
             throw new Error("Please provide a message for the prompt.");
         }
 
-        this.scope = scope;
-        this.value = null;
+        this.target = target;
         this.options = {
             validate: validators["default"],
             maxAttempts: DEFAULT_MAX_PROMPT_ATTEMPTS,
             timeout: DEFAULT_TIMEOUT,
             ...input
         };
+
+        this.value = null;
+        this.error = null;
     }
 
     run() {
+        this.value = this.error = null;
         return this.promise = new Promise((resolve, reject) => {
             this.reject = reject;
             this.resolve = resolve;
 
             let attempt = 0;
-            this.scope.on("message:received", this.handler = (message) => {
+            this.target.on("message:received", this.handler = (message) => {
                 Promise.try(this.options.validate.bind(null, message))
                     .then(this.finalize.bind(this))
                     .catch(err => {
                         if(attempt < this.options.maxAttempts) {
                             attempt++;
-                            return this.scope.sendMessage(`${err.message} (${this.options.maxAttempts - attempt + 1} attempts remaining)`);
-                        } else throw new Error("Too many attempts, sorry. I didn't understand your input.");
-                    }).catch(reject);
+                            return this.target.sendMessage(`${err.message} (${this.options.maxAttempts - attempt + 1} attempts remaining)`);
+                        } else throw Object.assign(
+                            new Error("Too many attempts, sorry. I didn't understand your input."),
+                            { attempt, maxAttempts: this.options.maxAttempts }
+                        );
+                    })
+                    .catch(this.fail.bind(this));
             });
 
-            this.scope.sendMessage(this.options.message).catch(reject);
+            this.target.sendMessage(this.options.message).catch(this.fail.bind(this));
         }).timeout(this.options.timeout).tapCatch(err => {
             if(err instanceof TimeoutError) {
-                return this.scope.sendMessage(`Sorry, too slow.`);
+                return this.target.sendMessage(`Sorry, too slow.`);
             }
         });
     }
 
     finalize(value) {
-        this.scope.removeListener("message:received", this.handler);
-        this.resolve(this.value = value);
+        if(this.resolve) {
+            this.value = value;
+            this.error = null;
+            this.resolve(value);
+            this.close();
+        }
+    }
+
+    fail(error) {
+        if(this.reject) {
+            this.value = null;
+            this.error = error;
+            this.reject(error);
+            this.close();
+        }
+    }
+
+    close() {
+        this.resolve = this.reject = null;
+        this.target.removeListener("message:received", this.handler);
+        this.closed = true;
     }
 
     cancel(message) {
-        if(!this.reject) {
+        if(!this.isPending()) {
             throw new Error("Prompt has not started, cannot cancel.");
         }
 
-        this.reject(new CancellationError(message));
+        this.fail(new CancellationError(message));
     }
 
     isPending() {
@@ -106,6 +132,6 @@ export class Prompt {
     }
 }
 
-export default function prompt(scope, input) {
-    return (new Prompt(scope, input)).run();
+export default function prompt(target, input) {
+    return (new Prompt(target, input)).run();
 };
