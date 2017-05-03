@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "main": "build/src/index.js",
   "bin": {
-    "tw-chat": "./build/bin/tw-chat"
+    "tw-chat": "build/bin/tw-chat"
   },
   "directories": {
     "bin": "bin"
@@ -53,9 +53,10 @@
     "build:bin:tw-chat": "babel -d build bin/tw-chat*",
     "build:bin:rename": "renamer --find '.js' --replace '' build/bin/*",
     "build:bin:fix-binary": "replace '#!/usr/bin/env babel-node --' '#!/usr/bin/env node' build/bin -r",
+    "build:bin:remove-package": "replace '../package.json' '../../package.json' build -r",
     "build:bin:chmod": "chmod +x build/bin/*",
-    "build:bin:copy-json": "cp *.json build/",
-    "build:bin": "npm run build:bin:lib && npm run build:bin:tw-chat && npm run build:bin:rename && npm run build:bin:fix-binary && npm run build:bin:chmod && npm run build:bin:copy-json",
+    "build:bin:copy-json": "cp config.json build/",
+    "build:bin": "npm run build:bin:lib && npm run build:bin:tw-chat && npm run build:bin:rename && npm run build:bin:fix-binary && npm run build:bin:chmod && npm run build:bin:copy-json && npm run build:bin:remove-package",
     "build": "npm run clean && npm run build:src && npm run build:bin",
     "dev:src": "nodemon -x npm run build:src -w src",
     "browser:build": "webpack -p",
