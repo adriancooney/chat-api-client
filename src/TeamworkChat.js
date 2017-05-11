@@ -938,11 +938,12 @@ export default class TeamworkChat extends Person {
      * @param  {String|Object}  installation  The installation URL.
      * @param  {String}         username      The username used to login to Teamwork.
      * @param  {String}         password      The password used to login to Teamwork (disposed after initial login request).
+     * @param  {String}         socketServer  The socket server to target. Optional, defaults to env and config.json combo.
      * @return {Promise<TeamworkChat>}        An authorized and fully connected TeamworkChat instance.
      */
-    static fromCredentials(installation, username, password) {
+    static fromCredentials(installation, username, password, socketServer) {
         debug(`logging in with user ${username} to ${installation}.`);
-        return APIClient.loginWithCredentials(installation, username, password).then(api => {
+        return APIClient.loginWithCredentials(installation, username, password, socketServer).then(api => {
             return new TeamworkChat(api, api.user);
         });
     }
@@ -958,11 +959,17 @@ export default class TeamworkChat extends Person {
      * @param  {String|Object}  installation The installation URL.
      * @param  {String}         username     The username used to login to Teamwork.
      * @param  {String}         password     The password used to login to Teamwork (disposed after initial login request).
+     * @param  {String}         socketServer The socket server to target. Optional, defaults to env and config.json combo.
      * @param  {Function}       callback     The callback (!) that has param `chat` TeamworkChat instance. This returns
      *                                       a promise that when complete, closes the connection to Teamwork.
      * @return {Promise}                     Resolves to nothing but ensures connection to Teamwork is closed fully.
      */
-    static withCredentials(installation, username, password, callback) {
+    static withCredentials(installation, username, password, socketServer, callback) {
+        if(typeof socketServer === "function") {
+            callback = socketServer;
+            socketServer = undefined;
+        }
+
         return Promise.using(TeamworkChat.fromCredentials(installation, username, password).disposer(chat => {
             return chat.logout();
         }), callback);
@@ -973,10 +980,11 @@ export default class TeamworkChat extends Person {
      *
      * @param  {String|Object}  installation The installation URL.
      * @param  {String}         auth         The user's auth key.
+     * @param  {String}         socketServer The socket server to target. Optional, defaults to env and config.json combo.
      * @return {Promise<TeamworkChat>}       An authorized and fully connected TeamworkChat instance.
      */
-    static fromAuth(installation, auth) {
-        return APIClient.loginWithAuth(installation, auth).then(api => {
+    static fromAuth(installation, auth, socketServer) {
+        return APIClient.loginWithAuth(installation, auth, socketServer).then(api => {
             return new TeamworkChat(api, api.user);
         });
     }
@@ -986,12 +994,18 @@ export default class TeamworkChat extends Person {
      *
      * @param  {String|Object}  installation The installation URL.
      * @param  {String}         auth         The user's auth key.
+     * @param  {String}         socketServer The socket server to target. Optional, defaults to env and config.json combo.
      * @param  {Function}       callback     The callback (!) that has param `chat` TeamworkChat instance. This returns
      *                                       a promise that when complete, closes the connection to Teamwork.
      * @return {Promise<TeamworkChat>}       An authorized and fully connected TeamworkChat instance.
      */
-    static withAuth(installation, auth, callback) {
-        return Promise.using(TeamworkChat.fromAuth(installation, auth).disposer(chat => {
+    static withAuth(installation, auth, socketServer, callback) {
+        if(typeof socketServer === "function") {
+            callback = socketServer;
+            socketServer = undefined;
+        }
+
+        return Promise.using(TeamworkChat.fromAuth(installation, auth, socketServer).disposer(chat => {
             return chat.logout();
         }), callback);
     }
@@ -1001,10 +1015,11 @@ export default class TeamworkChat extends Person {
      *
      * @param  {String|Object}  installation The installation URL.
      * @param  {String}         key          The user's Projects "API Key".
+     * @param  {String}         socketServer The socket server to target. Optional, defaults to env and config.json combo.
      * @return {Promise<TeamworkChat>}       An authorized and fully connected TeamworkChat instance.
      */
-    static fromKey(installation, key) {
-        return APIClient.loginWithKey(installation, key).then(api => {
+    static fromKey(installation, key, socketServer) {
+        return APIClient.loginWithKey(installation, key, socketServer).then(api => {
             return new TeamworkChat(api, api.user);
         });
     }
@@ -1014,12 +1029,18 @@ export default class TeamworkChat extends Person {
      *
      * @param  {String|Object}  installation The installation URL.
      * @param  {String}         key          The user's Projects "API Key".
+     * @param  {String}         socketServer The socket server to target. Optional, defaults to env and config.json combo.
      * @param  {Function}       callback     The callback (!) that has param `chat` TeamworkChat instance. This returns
      *                                       a promise that when complete, closes the connection to Teamwork.
      * @return {Promise<TeamworkChat>}       An authorized and fully connected TeamworkChat instance.
      */
-    static withKey(installation, key, callback) {
-        return Promise.using(TeamworkChat.fromKey(installation, key).disposer(chat => {
+    static withKey(installation, key, socketServer, callback) {
+        if(typeof socketServer === "function") {
+            callback = socketServer;
+            socketServer = undefined;
+        }
+
+        return Promise.using(TeamworkChat.fromKey(installation, key, socketServer).disposer(chat => {
             return chat.logout();
         }), callback);
     }
@@ -1029,11 +1050,11 @@ export default class TeamworkChat extends Person {
             throw new Error("Installation must be provided.");
 
         if(details.auth) {
-            return TeamworkChat.fromAuth(details.installation, details.auth);
+            return TeamworkChat.fromAuth(details.installation, details.auth, details.socketServer);
         } else if(details.key) {
-            return TeamworkChat.fromKey(details.installation, details.key);
+            return TeamworkChat.fromKey(details.installation, details.key, details.socketServer);
         } else if(details.username && details.password) {
-            return TeamworkChat.fromCredentials(details.installation, details.username, details.password);
+            return TeamworkChat.fromCredentials(details.installation, details.username, details.password, details.socketServer);
         } else {
             throw new Error("Unknown login details.");
         }

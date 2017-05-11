@@ -124,11 +124,12 @@ export default class APIClient extends EventEmitter {
      * @param  {String} auth         The `tw-auth` token.
      * @return {APIClient}           The authorized APIClient instance.
      */
-    constructor(installation, auth) {
+    constructor(installation, auth, socketServer) {
         super();
 
         this.installation = installation;
         this.auth = auth;
+        this.socketServer = socketServer;
     }
 
     /**
@@ -237,10 +238,10 @@ export default class APIClient extends EventEmitter {
      * @param  {String} message Raw frame string returned from server.
      */
     onSocketMessage(message) {
-        debug("incoming frame", message);
-
         try {
             const frame = JSON.parse(message);
+
+            debug("incoming frame", inspect(frame));
 
             if(this.awaiting.length) {
                 this.awaiting.slice().forEach(filter => {
@@ -253,6 +254,7 @@ export default class APIClient extends EventEmitter {
             this.emit("message", message);
             this.emit("frame", frame);
         } catch(err) {
+            debug("bad frame", inspect(message));
             this.emit("error", Object.assign(new Error(`Error parsing frame`), { frame }));
         }
     }
@@ -279,7 +281,9 @@ export default class APIClient extends EventEmitter {
      * @return {Promise} Resolves when authentication is completed successfully.
      */
     authenticate(user) {
+        debug("authenticating with chat-server, awaiting authentication.request challenge");
         return this.awaitFrame("authentication.request").then(() => {
+            debug("challenge recieved, responding with auth");
             return this.sendFrame("authentication.response", {
                 authKey: user.authkey,
                 userId: parseInt(user.id),
@@ -288,17 +292,47 @@ export default class APIClient extends EventEmitter {
                 clientVersion: pkg.version
             });
         }).then(() => {
+            debug("awaiting response with success or failure")
             // Race the error or confirmation frames.
             return this.raceFrames("authentication.error", "authentication.confirmation");
         }).then(frame => {
             if(frame.name === "authentication.error") {
+                debug("authentication failed");
                 throw new Error(frame.contents);
             }
+
+            debug("successfully authenticated");
 
             // Start the pinging
             this.nextPing();
 
             return null;
+        });
+    }
+
+    getSocketServer() {
+        if(typeof this.socketServer === "string") {
+            return this.socketServer;
+        }
+
+        // Decide if were working on production or development environment by looking at the hostname
+        const { hostname } = url.parse(this.installation);
+        const env = hostname.match(/teamwork.com/) ? "production" : "development";
+
+        // grab the connection details from the config based on the env
+        let server = config[env].server;
+
+        // If it's the development environment, we want to hit the `hostname` but
+        // also configure the ports and protocol.
+        if(env === "development") {
+            server = {
+                ...server, hostname
+            };
+        }
+
+        return url.format({
+            ...server,
+            slashes: true
         });
     }
 
@@ -309,28 +343,18 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<APIClient>} Resolves when the server has successfully completed authentication.
      */
     connect(authenticate = true) {
+        const bufferedMessages = [];
+        const bufferMessage = message => bufferedMessages.push(message);
+
         return this.getProfile().then(res => {
             // Save the logged in user's account to `user`;
             this.user = Object.assign(res.account, {
                 id: parseInt(res.account.id)
             });
 
+            const socketServer = this.getSocketServer();
+
             return new Promise((resolve, reject) => {
-                const { hostname } = url.parse(this.installation);
-                const env = hostname.match(/teamwork.com/) ? "production" : "development"
-                let server = config[env].server;
-
-                if(env === "development") {
-                    server = {
-                        ...server, hostname
-                    };
-                }
-
-                const socketServer = url.format({
-                    ...server,
-                    slashes: true
-                });
-
                 debug(`connecting socket server to ${socketServer}`);
                 this.socket = new APIClient.WebSocket(socketServer, {
                     headers: {
@@ -338,7 +362,7 @@ export default class APIClient extends EventEmitter {
                     }
                 });
 
-                this.socket.on("message", this.onSocketMessage.bind(this));
+                this.socket.on("message", bufferMessage);
 
                 // Attach the reject handler for the error handler, see below for when we remove it
                 // and add replace it with `onSocketError` handler when the authentication flow completes.
@@ -357,6 +381,23 @@ export default class APIClient extends EventEmitter {
                     resolve(this.socket);
                 });
             });
+        }).tap(() => {
+            // This sucks. There's a race condition between binding event listeners or `awaitFrame`
+            // and the first frame coming in. This code isn't necessary with the current chat-server
+            // implementation because there is a delay between the opening of the socket and the
+            // first `authentication.request` frame which gives us time to `awaitFrame("authentication.request")`
+            // however with our new, shiny `chat-ws-proxy`, it's too fast and we drop the first frame.
+            // We add in a delay of 10ms to give users a chance to listen for events/awaitFrame.
+            Promise.delay(10).then(() => {
+                this.socket.removeListener("message", bufferMessage);
+                this.socket.on("message", this.onSocketMessage.bind(this));
+
+                bufferedMessages.forEach(message => {
+                    this.onSocketMessage(message);
+                });
+            });
+
+            return null;
         }).then(() => {
             if(authenticate) {
                 return this.authenticate(this.user);
@@ -947,18 +988,19 @@ export default class APIClient extends EventEmitter {
     /**
      * Login and connect to the chat server.
      *
-     * @param  {String|Object}  installation The user's installation.
-     * @param  {String}         username     The user's username.
-     * @param  {String}         password     The user's password.
+     * @param  {String|Object}  installation  The user's installation.
+     * @param  {String}         username      The user's username.
+     * @param  {String}         password      The user's password.
+     * @param  {String}         socketServer  The socket server to target. Optional, defaults to env and config.json combo.
      * @return {Promise<APIClient>}          Resolves to a new instance of APIClient that can make authenticated requests
      *                                       as the user. The user's details can be access at `APIClient.user`.
      */
-    static loginWithCredentials(installation, username, password) {
+    static loginWithCredentials(installation, username, password, socketServer) {
         installation = APIClient.normalizeInstallation(installation);
 
         debug(`attempting to login with ${username} to ${installation}.`);
         return APIClient.login(installation, username, password).then(auth => {
-            return (new APIClient(installation, auth)).connect();
+            return (new APIClient(installation, auth, socketServer)).connect();
         });
     }
 
@@ -967,14 +1009,15 @@ export default class APIClient extends EventEmitter {
      *
      * @param  {String|Object}  installation  The user's installation.
      * @param  {String}         auth          The user's auth key (this will fail if the auth key is invalid or expired).
+     * @param  {String}         socketServer  The socket server to target. Optional, defaults to env and config.json combo.
      * @return {Promise<APIClient>}           Resolves to a new instance of APIClient that can make authenticated requests
      *                                        as the user. The user's details can be access at `APIClient.user`.
      */
-    static loginWithAuth(installation, auth) {
+    static loginWithAuth(installation, auth, socketServer) {
         installation = APIClient.normalizeInstallation(installation);
 
         debug(`attempting to login with auth key "${auth}" to ${installation}`);
-        const api = new APIClient(installation, auth);
+        const api = new APIClient(installation, auth, socketServer);
 
         return api.connect();
     }
@@ -982,13 +1025,14 @@ export default class APIClient extends EventEmitter {
     /**
      * Login with a Projects "API Key".
      *
-     * @param  {String} installation The user's installation.
-     * @param  {String} key          The "API Key".
+     * @param  {String|Object}  installation  The user's installation.
+     * @param  {String}         key           The "API Key".
+     * @param  {String}         socketServer  The socket server to target. Optional, defaults to env and config.json combo.
      * @return {Promise<APIClient>}  Resolves to an authenticated APIClient instance.
      */
-    static loginWithKey(installation, key) {
+    static loginWithKey(installation, key, socketServer) {
         // This method of logging is caarrraaazzzzyyy.
-        return APIClient.loginWithCredentials(installation, key, "club-lemon");
+        return APIClient.loginWithCredentials(installation, key, "club-lemon", socketServer);
     }
 
     /**
