@@ -176,23 +176,26 @@ export default class TeamworkChat extends Person {
             debug(`socket reconnection process failed, attempting to reconnect (attempt ${attempt})`);
         }
 
-        return this.connect().then(() => {
-            debug("socket reconnected to server");
-            this.monitor.reconnects++;
+        return this.connect()
+        // .then(() => {
+        //     debug("socket reconnected to server");
+        //     this.monitor.reconnects++;
 
-            debug("getting updates");
-            return this.getUpdates(this.monitor.lastDisconnectTimestamp);
-        }).spread((people, rooms, messages) => {
-            // Calculate the length of time we we're disconnected
-            const outage = moment.duration(moment().diff(this.monitor.lastDisconnectTimestamp));
+        //     debug("getting updates");
+        //     return this.getUpdates(this.monitor.lastDisconnectTimestamp);
+        // })
+        // .spread((people, rooms, messages) => {
+        //     // Calculate the length of time we we're disconnected
+        //     const outage = moment.duration(moment().diff(this.monitor.lastDisconnectTimestamp));
 
-            // Update the downtime
-            this.monitor.downtime.add(outage);
+        //     // Update the downtime
+        //     this.monitor.downtime.add(outage);
 
-            // Note: it's okay if this call fails, we will re-attempt it in the catch. Don't
-            // worry, it won't attempt to reconnect to the websocket again.
-            this.emit("reconnect", people, rooms, messages, outage);
-        }).catch(error => {
+        //     // Note: it's okay if this call fails, we will re-attempt it in the catch. Don't
+        //     // worry, it won't attempt to reconnect to the websocket again.
+        //     this.emit("reconnect", people, rooms, messages, outage);
+        // })
+        .catch(error => {
             debug("unable to reconnect socket and get updates", error);
             return Promise.delay(RECONNECT_INTERVAL).then(this.onDisconnect.bind(this, attempt + 1));
         });
