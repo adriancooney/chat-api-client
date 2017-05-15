@@ -1,6 +1,6 @@
 {
   "name": "@teamwork/chat-almighty",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "main": "build/src/index.js",
   "bin": {
     "tw-chat": "build/bin/tw-chat"
