@@ -184,6 +184,35 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
+     * Buffer a specific amount of frames and return them once the buffer is full.
+     * @param  {Number} count The size of the buffer (default: 1)
+     * @return {Promise<Array>} Resolves to an array of frames.
+     */
+    bufferFrames(count = 1) {
+        const bufferedFrames = []
+
+        return new Promise((resolve) => {
+            const handler = frame => {
+                debug("frame received")
+                if(bufferedFrames.length < count) {
+                    bufferedFrames.push(frame);
+
+                    debug(`buffering frame for await, ${count - bufferedFrames.length} left`);
+
+                    if(bufferedFrames.length >= count) {
+                        debug("buffered frame count")
+                        this.removeListener("frame", handler);
+
+                        return resolve(bufferedFrames);
+                    }
+                }
+            };
+
+            this.on("frame", handler);
+        });
+    }
+
+    /**
      * Await multiple packets and pick (resolve) the first.
      *
      * @param  {...Object} filters  Filters applied to APIClient#awaitFrame.
@@ -254,8 +283,8 @@ export default class APIClient extends EventEmitter {
             this.emit("message", message);
             this.emit("frame", frame);
         } catch(err) {
-            debug("bad frame", inspect(message));
-            this.emit("error", Object.assign(new Error(`Error parsing frame`), { frame }));
+            debug("bad frame", err, inspect(message));
+            this.emit("error", Object.assign(new Error(`Error parsing frame`), { message }));
         }
     }
 
@@ -545,13 +574,66 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
+     * Clear a room's message history.
+     *
+     * @param  {Number} room          The room ID.
+     * @param  {Number} beforeMessage The ID of a message that you want to clear messages BEFORE.
+     * @return {Promise}              Resolves with the API response.
+     */
+    clearRoomHistory(room, beforeMessage) {
+        return Promise.try(() => {
+            return this.getRoom(room, { includeUsers: false });
+        }).then(room => {
+            if(room.type !== "pair") {
+                throw new Error(`You cannot clear a non-pair room's history. Room ${room.id} is a ${room.type} room.`);
+            }
+
+            if(!beforeMessage) {
+                return [this.getLatestMessageForRoom(room.id), room.id];
+            } else {
+                return [beforeMessage, room.id];
+            }
+        }).spread((beforeMessage, room) => {
+            if(!beforeMessage) {
+                // If there is no messages in the room, we simply return because it's
+                // in a state (i.e. no messages), that the user expected.
+                return;
+            }
+
+            if(typeof beforeMessage === "object") {
+                beforeMessage = beforeMessage.id;
+            }
+
+            return this.request(`/chat/v2/conversations/${room}/user-settings.json`, {
+                method: "PUT",
+                body: {
+                    userSettings: {
+                        messageIdHistoryStartsAfter: beforeMessage
+                    }
+                }
+            });
+        });
+    }
+
+    /**
+     * Get the latest message in a room.
+     *
+     * @param  {Number}          room The room ID.
+     * @return {Promise<Object>}      The latest message.
+     */
+    getLatestMessageForRoom(room) {
+        return this.getMessages(room, { pageSize: 1}).then(({ messages }) => messages[0]);
+    }
+
+    /**
      * Send the `room.user.active` frame for a room. This will resolve when we receive a
-     * response from the server with the same contents sent.
+     * response from the server with the same contents sent. (I think we can come up with
+     * a better name for this.)
      *
      * @param  {Number} room        The room ID to send the room active frame for.
      * @return {Promise<Object>}    Resolves to the response frame.
      */
-    activateRoom(room) {
+    activateRoom(room, date) {
         const timestamp = (new Date()).toJSON();
         return this.sendFrame("room.user.active", {
             roomId: room,
@@ -560,6 +642,7 @@ export default class APIClient extends EventEmitter {
             return this.awaitFrame({
                 type: "room.user.active",
                 contents: {
+                    date,
                     roomId: room,
                     activeAt: timestamp
                 }
@@ -759,6 +842,96 @@ export default class APIClient extends EventEmitter {
     }
 
     /**
+     * Update the currently logged in user's Handle.
+     * @param  {String} handle   The new handle.
+     * @return {Promise<Object>} Resolves when the request completes.
+     */
+    updateHandle(handle) {
+        return this.request(`/chat/people/${this.user.id}.json`, {
+            method: "PUT",
+            body: {
+                person: {
+                    handle
+                }
+            }
+        })
+    }
+
+    /**
+     * POST /chat/rooms/:room/message.json - Create a new message via the API.
+     *
+     * This is different from `sendMessage` in that it creates the message via
+     * a POST request to the API and not via the socket.
+     * @param  {Number} room     The room ID.
+     * @param  {String} message  The message body.
+     * @return {Promise<Object>} Resolves with { "STATUS": "OK" } if successful.
+     */
+    createMessage(room, message) {
+        return this.request(`/chat/rooms/${room}/messages.json`, {
+            method: "POST",
+            body: {
+                message: {
+                    body: message
+                }
+            }
+        });
+    }
+
+    /**
+     * DELETE /chat/rooms/:chat/messages.json - Delete muliple messages from a room.
+     *
+     * @param  {Number}          room      The room ID.
+     * @param  {Array<Number>}   messages  Array of message IDs.
+     * @return {Promise<Object>} Resolves when request is complete.
+     */
+    deleteMessages(room, messages) {
+        return this.request(`/chat/rooms/${room}/messages.json`, {
+            method: "DELETE",
+            body: {
+                ids: messages
+            }
+        });
+    }
+
+    /**
+     * DELETE /chat/rooms/:chat/messages.json - Delete a message from a room.
+     *
+     * @param  {Number}  room    The room ID.
+     * @param  {Number}  message Message ID.
+     * @return {Promise<Object>} Resolves when request is complete.
+     */
+    deleteMessage(room, message) {
+        return this.deleteMessages(room, [ message ]);
+    }
+
+    /**
+     * PUT /chat/rooms/:chat/messages.json - Undelete ("undo message delete") a message from a room.
+     *
+     * @param  {Number}          room      The room ID.
+     * @param  {Array<Number>}   messages  Array of message IDs.
+     * @return {Promise<Object>} Resolves when request is complete.
+     */
+    undeleteMessages(room, messages) {
+        return this.request(`/chat/rooms/${room}/messages.json`, {
+            method: "PUT",
+            body: {
+                messages: messages.map(id => ({ id, status: "active"}))
+            }
+        });
+    }
+
+    /**
+     * PUT /chat/rooms/:chat/messages.json - Undelete ("undo message delete") a message from a room.
+     *
+     * @param  {Number}  room    The room ID.
+     * @param  {Number}  message Message ID.
+     * @return {Promise<Object>} Resolves when request is complete.
+     */
+    undeleteMessage(room, message) {
+        return this.undeleteMessages(room, [ message ])
+    }
+
+    /**
      * POST /chat/v2/rooms.json - Create a new room with handles and an initial message.
      *
      * @param  {Array<String>}  handles  Array of user handles (without `@` symbol).
@@ -822,7 +995,7 @@ export default class APIClient extends EventEmitter {
     getRoom(room, { includeUsers } = { includeUsers: true }) {
         return this.request(`/chat/v2/rooms/${room}.json`, {
             query: { includeUserData: includeUsers }
-        });
+        }).then(({ room }) => room);
     }
 
     /**
@@ -869,6 +1042,8 @@ export default class APIClient extends EventEmitter {
      * Note: Unfortunately, this doesn't follow the other pagination schema so you're
      * on your own with regards to iterating the pages and the like.
      *
+     * TODO: Move page and pageSize to options.
+     *
      * @param  {Object} filter          Object containing filters.
      * @param  {String} filter.since    Timestamp to get message from now until `since`.
      * @param  {Number} page            The page number.
@@ -887,11 +1062,16 @@ export default class APIClient extends EventEmitter {
     /**
      * GET /chat/v2/rooms/<room>/messages.json - Get messages for a room.
      *
-     * @param  {Number} room The room ID.
-     * @return {Object}      The messages return from the API.
+     * @param  {Number} room    The room ID.
+     * @param  {Object} options          Options to configure the results return.
+     * @param  {Object} options.page     Configure which page to return.
+     * @param  {Object} options.pageSize Configure how many values are returned.
+     * @return {Object}         The messages return from the API.
      */
-    getMessages(room) {
-        return this.request(`/chat/v2/rooms/${room}/messages.json`);
+    getMessages(room, filter) {
+        const query = Object.assign({}, filter);
+
+        return this.request(`/chat/v2/rooms/${room}/messages.json`, { query });
     }
 
     /**
@@ -980,7 +1160,7 @@ export default class APIClient extends EventEmitter {
                 return twAuth;
             } else {
                 debug(`login failed: ${res.status}`);
-                throw new Error(`Invalid login credentials for ${username}@${installation}.`);
+                throw new Error(`Invalid login for ${username}@${installation}: ${res.status} ${res.statusText}`);
             }
         })
     }
@@ -1035,6 +1215,21 @@ export default class APIClient extends EventEmitter {
         return APIClient.loginWithCredentials(installation, key, "club-lemon", socketServer);
     }
 
+    static from(details = {}) {
+        if(!details.installation)
+            throw new Error("Installation must be provided.");
+
+        if(details.key) {
+            return APIClient.loginWithKey(details.installation, details.key, details.socketServer);
+        } else if(details.auth) {
+            return APIClient.loginWithAuth(details.installation, details.auth, details.socketServer);
+        } else if(details.username && details.password) {
+            return APIClient.loginWithCredentials(details.installation, details.username, details.password, details.socketServer);
+        } else {
+            throw new Error("Unknown login details.");
+        }
+    }
+
     /**
      * Create a frame to send to the socket server.
      *
@@ -1068,7 +1263,7 @@ export default class APIClient extends EventEmitter {
      *          "type"      {String}    Match the exact frame type. Exception: "*", matches
      *          "type"      {RegExp}    Match the frame name by regex.
      *          "nonce"     {Number}    Match the exact nonce of the frame.
-     *          "contents"  {Object}    Deep equal contents object.
+     *          "contents"  {Object}    Match if "contents" is a subset of the frame's "contents".
      *
      *     Fitlers can also be specified in shorthand:
      *      - If the filter is a string, it is converted to a `{ type: <filter> }` object.
@@ -1107,7 +1302,7 @@ export default class APIClient extends EventEmitter {
         }
 
         if(filter.contents) {
-            matches.push(isEqual(filter.contents, frame.contents));
+            matches.push(isSubset(filter.contents, frame.contents));
         }
 
         if(!matches.length) {
@@ -1115,6 +1310,10 @@ export default class APIClient extends EventEmitter {
         }
 
         return matches.every(match => match);
+    }
+
+    static matchAnyFrame(filter, frames) {
+        return frames.some(frame => APIClient.matchFrame(filter, frame));
     }
 
     /**
@@ -1190,4 +1389,24 @@ export class HTTPError extends Error {
 function extractTWAuthCookie(cookies) {
     const [ twAuthCookie ] = cookies.split(";");
     return twAuthCookie.split("=")[1];
+}
+
+/**
+ * Determine if an input object is a subset of another object.
+ * @param  {Object}  subset The subset.
+ * @param  {Object}  target The object you expect `subset` to be a subset of.
+ * @return {Boolean}        Whether or not a subset.
+ */
+export function isSubset(subset, target) {
+    return Object.entries(subset).reduce((isSub, [ key, value ]) => {
+        if(!isSub) {
+            return false;
+        }
+
+        if(typeof value === "object" && !Array.isArray(value)) {
+            return isSubset(value, target[key]);
+        } else {
+            return isEqual(value, target[key]);
+        }
+    }, true)
 }

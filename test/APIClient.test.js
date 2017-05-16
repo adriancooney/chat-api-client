@@ -1,32 +1,32 @@
 import assert from "assert";
-import APIClient from "../src/APIClient";
+import APIClient, { isSubset } from "../src/APIClient";
 import { INSTALLATION, USERNAME, PASSWORD, localAPIClient } from "./fixture";
 
 describe("APIClient", () => {
-    describe("static methods", () => {
-        describe(".loginWithCredentials", () => {
-            it("should login correctly", async () => {
-                await APIClient.loginWithCredentials(INSTALLATION, USERNAME, PASSWORD);
-            });
-        });
-    });
-
-    describe("instance methods", () => {
-        let api;
-        beforeEach(async () => {
-            api = await localAPIClient();
-        });
-
-        describe("#sendFrame", () => {
-            it("should not send frame on disconnect", async () => {
-                api.socket.close();
-                
-                try {
-                    await api.sendFrame("test-frame", {});
-                } catch(err) {
-                    assert.equal("Socket is not connected to the server. Please reconnect.", err.message);
+    describe("isSubset", () => {
+        it("should successfully check the subset", () => {
+            const id = 488539;
+            assert(isSubset({
+                contents: {
+                    roomId: `3735`,
+                    ids: [ id ]
                 }
-            });
+            }, {
+                contents: {
+                    roomId: '3735',
+                    ids: [ 488539 ],
+                    installationId: 385654,
+                    shard: 7
+                }
+            }));
+
+            assert(isSubset(
+                { roomId: '3735', ids: [ 488566 ] },
+                { roomId: '3735',
+                  ids: [ 488566 ],
+                  installationId: 385654,
+                  shard: 7 }
+            ));
         });
-    });
+    })
 });

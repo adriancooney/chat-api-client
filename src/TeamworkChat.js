@@ -543,7 +543,7 @@ export default class TeamworkChat extends Person {
         const room = this.findRoomById(id);
 
         if(!room || !cached) {
-            return this.api.getRoom(id).then(({ room }) => this.saveRoom(room));
+            return this.api.getRoom(id).then(room => this.saveRoom(room));
         } else return Promise.resolve(room);
     }
 
@@ -1048,18 +1048,9 @@ export default class TeamworkChat extends Person {
         }), callback);
     }
 
-    static from(details = {}) {
-        if(!details.installation)
-            throw new Error("Installation must be provided.");
-
-        if(details.auth) {
-            return TeamworkChat.fromAuth(details.installation, details.auth, details.socketServer);
-        } else if(details.key) {
-            return TeamworkChat.fromKey(details.installation, details.key, details.socketServer);
-        } else if(details.username && details.password) {
-            return TeamworkChat.fromCredentials(details.installation, details.username, details.password, details.socketServer);
-        } else {
-            throw new Error("Unknown login details.");
-        }
+    static from(details) {
+        return APIClient.from(details).then(api => {
+            return new TeamworkChat(api, api.user);
+        });
     }
 }

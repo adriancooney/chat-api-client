@@ -58,7 +58,7 @@
     "build:bin:copy-json": "cp config.json build/",
     "build:bin": "npm run build:bin:lib && npm run build:bin:tw-chat && npm run build:bin:rename && npm run build:bin:fix-binary && npm run build:bin:chmod && npm run build:bin:copy-json && npm run build:bin:remove-package",
     "build": "npm run clean && npm run build:src && npm run build:bin",
-    "dev:src": "nodemon -x npm run build:src -w src",
+    "dev:src": "nodemon -x 'npm run build:src && npm run build:bin:remove-package' -w src",
     "browser:build": "webpack -p",
     "browser:test:build": "webpack --output-pathinfo --config test/browser/webpack.test.config.js",
     "browser:test": "npm run browser:test:build && open ./test/browser/index.html",

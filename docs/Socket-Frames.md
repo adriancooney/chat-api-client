@@ -1,6 +1,6 @@
 # Socket Frames
 ### `room.message.created` (received)
-Fired when a message is created. 
+Fired when a message is created.
 
 ```json
 {
@@ -112,9 +112,37 @@ Response frame:
 }
 ```
 
+### `room.updated`
+Called when a room is created or updated.
+
+```json
+{
+    "validator": {},
+    "contentType": "object",
+    "name": "room.updated",
+    "contents": {
+        "id": 5594
+    }
+}
+```
+
+### `room.deleted`
+
+```json
+{
+    "validator": {},
+    "contentType": "object",
+    "name": "room.deleted",
+    "contents": {
+        "id": 5594,
+        "installationId": 385654,
+        "shard": 7
+    }
+}
+```
+
 ### `room.typing`
 Updating typing status.
-
 
 ```json
 {
@@ -173,6 +201,19 @@ When a new company is added to projects.
 }
 ```
 
+### `company.updated`
+
+```json
+{
+    "validator": {},
+    "contentType": "object",
+    "name": "company.updated",
+    "contents": {
+        "id": 74464
+    }
+}
+```
+
 ### `company.deleted`
 When a company is deleted in projects.
 
@@ -183,6 +224,79 @@ When a company is deleted in projects.
     "name": "company.deleted",
     "contents": {
         "id": 61825
+    }
+}
+```
+
+### `room.message.updated`
+When a message is updated.
+
+```json
+{
+    "validator": {},
+    "contentType": "object",
+    "name": "room.message.updated",
+    "contents": {
+        "userId": 120606,
+        "installationId": 385654,
+        "roomId": 3735,
+        "id": 487643,
+        "thirdPartyCards": [
+            {
+                "type": "video",
+                "isActive": true,
+                "title": "Canterbury Park Corgi Races 7-30-2016",
+                "description": "Canterbury Park Corgi Races 7-30-2016.... 6 Heats and the Final!",
+                "providerName": "YouTube",
+                "providerUrl": "https://www.youtube.com/",
+                "html": "<iframe class=\"embedly-embed\" src=\"https://cdn.embedly.com/widgets/media.html?src=https%3A%2F%2Fwww.youtube.com%2Fembed%2FtPuKyeVsfZY%3Ffeature%3Doembed&url=http%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DtPuKyeVsfZY&image=https%3A%2F%2Fi.ytimg.com%2Fvi%2FtPuKyeVsfZY%2Fhqdefault.jpg&key=3a97319f77a8406a92b3b82c1990d836&type=text%2Fhtml&schema=youtube\" width=\"854\" height=\"480\" scrolling=\"no\" frameborder=\"0\" allowfullscreen></iframe>",
+                "url": "https://www.youtube.com/watch?v=tPuKyeVsfZY",
+                "faviconUrl": "https://s.ytimg.com/yts/img/favicon-vflz7uhzw.ico",
+                "isSafe": true,
+                "providerDisplay": "www.youtube.com",
+                "language": "en",
+                "lead": null,
+                "thumbnailWidth": 480,
+                "thumbnailHeight": 360
+            }
+        ]
+    },
+    "nonce": 4
+}
+```
+
+### `room.message.deleted`
+
+```json
+{
+    "contentType": "object",
+    "name": "room.messages.deleted",
+    "uid": "385654-3735",
+    "contents": {
+        "roomId": "3735",
+        "ids": [
+            487643
+        ],
+        "installationId": 385654,
+        "shard": 7
+    }
+}
+```
+
+### `room.message.deleted-undone`
+
+```json
+{
+    "contentType": "object",
+    "name": "room.messages.deleted-undone",
+    "uid": "385654-3735",
+    "contents": {
+        "roomId": "3735",
+        "ids": [
+            487668
+        ],
+        "installationId": 385654,
+        "shard": 7
     }
 }
 ```

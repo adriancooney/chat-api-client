@@ -261,7 +261,7 @@ export default class Room extends EventEmitter {
         const details = {
             ...rawMessage,
             room: this,
-            author
+            author: author || rawMessage.userId
         };
 
         if(message) {
