@@ -294,13 +294,18 @@ export default class APIClient extends EventEmitter {
     /**
      * Event Handler: when the client's websocket emits "close"
      */
-    onSocketClose() {
+    onSocketClose(reason, code = "none", message = "none") {
         this.debug("socket closed");
         this.stopPing();
 
         // Reject any awaiting frames
         if(this.awaiting.length) {
-            this.awaiting.forEach(({ reject }) => reject(new Error("Socket closed.")));
+            this.awaiting.forEach(({ reject, filter }) => {
+                console.log("killing await", filter);
+                return reject(new Error(
+                    `Socket closed for @${this.user.handle}, reason: ${reason}, code: ${code}, message: ${message}`
+                ));
+            });
         }
 
         this.emit("close");
@@ -336,7 +341,7 @@ export default class APIClient extends EventEmitter {
             this.debug("successfully authenticated");
 
             // Start the pinging
-            this.nextPing();
+            this.startPing();
 
             return null;
         });
@@ -380,7 +385,7 @@ export default class APIClient extends EventEmitter {
 
         return this.getProfile().then(res => {
             // Save the logged in user's account to `user`;
-            this.user = Object.assign(res.account, {
+            this.user = Object.assign(res.account, res.account.user, {
                 id: parseInt(res.account.id)
             });
 
@@ -407,10 +412,10 @@ export default class APIClient extends EventEmitter {
 
                     // Remove the "error" handler and replace it with the `onSocketError`.
                     this.socket.on("error", this.onSocketError.bind(this));
-                    this.socket.on("close", this.onSocketClose.bind(this));
+                    this.socket.on("close", this.onSocketClose.bind(this, "Socket was closed by the WebSocket client (usually server related)"));
 
                     // Update the debug to differentiate between users
-                    this.debug.namespace += ":@" + this.user.user.handle;
+                    this.debug.namespace = "tw-chat:api:@" + this.user.handle;
 
                     // Resolve when the socket opens
                     resolve(this.socket);
@@ -527,7 +532,7 @@ export default class APIClient extends EventEmitter {
         this.debug("forcefully closing socket");
         this.socket.close();
 
-        this.onSocketClose();
+        this.onSocketClose("The user force closed the socket");
     }
 
     /**
