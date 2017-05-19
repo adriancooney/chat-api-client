@@ -17,6 +17,7 @@ import {
     isUndefined,
     isPlainObject
 } from "lodash";
+import { indent } from "./util";
 import config from "../config.json";
 import pkg from "../package.json";
 
@@ -60,6 +61,12 @@ const PING_TIMEOUT = 3000;
  * @type {Array}
  */
 export const STATUS_TYPES = ["idle", "active"];
+
+/**
+ * Filter out these frames from output.
+ * @type {Array}
+ */
+const DEBUG_FILTERED_FRAMES = ["pong", "ping"];
 
 /**
  * The global nonce counter. Scoped to this APIClient module only so
@@ -142,13 +149,17 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object|String>}       The frame object (or string) sent.
      */
     send(frame) {
-        this.debug("sending message", frame);
         return Promise.try(() => {
             if(!this.connected) {
                 throw new Error("Socket is not connected to the server. Please reconnect.");
             }
 
+            if(!DEBUG_FILTERED_FRAMES.includes(frame.name)) {
+                this.debug("sending message \n" + indent(JSON.stringify(frame, null, 2)) + "\n");
+            }
+
             frame = typeof frame === "object" ? JSON.stringify(frame) : frame;
+
             this.socket.send(frame);
 
             return frame;
@@ -246,11 +257,16 @@ export default class APIClient extends EventEmitter {
      * @return {Promise<Object>}    Resolves to the reponse frame.
      */
     socketRequest(type, frame, timeout) {
-        this.debug(`socket request: ${type} (timeout = ${timeout})`, JSON.stringify(frame))
+        if(!DEBUG_FILTERED_FRAMES.includes(type)) {
+            this.debug(`socket request: ${type} (timeout = ${timeout})`, JSON.stringify(frame))
+        }
+
         return this.sendFrame(type, frame).then(packet => {
             return this.awaitFrame({ nonce: packet.nonce }, timeout);
         }).tap(packet => {
-            this.debug("socket response:", JSON.stringify(packet));
+            if(!DEBUG_FILTERED_FRAMES.includes(packet.name)) {
+                this.debug("socket response:", JSON.stringify(packet));
+            }
         });
     }
 
@@ -273,7 +289,9 @@ export default class APIClient extends EventEmitter {
         try {
             const frame = JSON.parse(message);
 
-            this.debug("incoming frame", inspect(frame));
+            if(!DEBUG_FILTERED_FRAMES.includes(frame.name)) {
+                this.debug("incoming frame\n" + indent(JSON.stringify(frame, null, 2)) + "\n");
+            }
 
             if(this.awaiting.length) {
                 this.awaiting.slice().forEach(filter => {
@@ -470,8 +488,6 @@ export default class APIClient extends EventEmitter {
         }
 
         return new Promise((resolve, reject) => {
-            this.debug("attempting ping");
-
             // We save this so `stopPing` can forcefully stop the pinging.
             this._nextPingReject = reject;
 
@@ -492,12 +508,12 @@ export default class APIClient extends EventEmitter {
                 return null;
             }).catch(err => this.emit.bind(this, "error"));
         }).then(() => {
-            this.debug("ping succeeded");
+            this.debug("ping pong");
             this.nextPing();
 
             return null; // Again, silencing the errors like above
         }).catch(CancellationError, () => {
-            this.debug("ping stopped");
+            this.debug("pinging stopped");
         }).catch(TimeoutError, () => {
             this.debug("pinging stopped, connection broken");
             this.close();
