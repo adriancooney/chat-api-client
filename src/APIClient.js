@@ -319,7 +319,6 @@ export default class APIClient extends EventEmitter {
         // Reject any awaiting frames
         if(this.awaiting.length) {
             this.awaiting.forEach(({ reject, filter }) => {
-                console.log("killing await", filter);
                 return reject(new Error(
                     `Socket closed for @${this.user.handle}, reason: ${reason}, code: ${code}, message: ${message}`
                 ));
