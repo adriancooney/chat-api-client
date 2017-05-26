@@ -1,14 +1,14 @@
 import Promise from "bluebird";
 import { inspect } from "util";
 import moment from "moment";
-import createDebug from "debug";
 import { omit, values, flatten, without, uniqBy, intersection, range, last, difference } from "lodash";
+import logging from "./lib/logging";
 import APIClient from "./APIClient";
 import Room from "./Room";
 import Person from "./Person";
 import Message from "./Message";
 
-const debug = createDebug("tw-chat");
+const logger = logging.add("tw-chat");
 
 /**
  * The time in ms to wait between reconnection attempts.
@@ -151,7 +151,7 @@ export default class TeamworkChat extends Person {
         this.room.on("person:updated", this.emit.bind(this, "person:updated"));
 
         // Adding "error" listener to stop the EventEmitter from throwing the error if no listeners are attached.
-        this.on("error", debug.bind(null, "TeamworkChat Error:"));
+        this.on("error", logger.error.bind(logger));
     }
 
 
@@ -166,7 +166,7 @@ export default class TeamworkChat extends Person {
         }
 
         if(attempt === 0) {
-            debug("socket disconnected");
+            logger.info("socket disconnected");
 
             // Update monitoring
             this.monitor.disconnects++;
@@ -174,15 +174,15 @@ export default class TeamworkChat extends Person {
 
             this.emit("disconnect");
         } else {
-            debug(`socket reconnection process failed, attempting to reconnect (attempt ${attempt})`);
+            logger.info(`socket reconnection process failed, attempting to reconnect (attempt ${attempt})`, { attempt });
         }
 
         return this.connect()
         // .then(() => {
-        //     debug("socket reconnected to server");
+        //     logger.info("socket reconnected to server");
         //     this.monitor.reconnects++;
 
-        //     debug("getting updates");
+        //     logger.info("getting updates");
         //     return this.getUpdates(this.monitor.lastDisconnectTimestamp);
         // })
         // .spread((people, rooms, messages) => {
@@ -197,7 +197,7 @@ export default class TeamworkChat extends Person {
         //     this.emit("reconnect", people, rooms, messages, outage);
         // })
         .catch(error => {
-            debug("unable to reconnect socket and get updates", error);
+            logger.error("unable to reconnect socket and get updates", { error });
             return Promise.delay(RECONNECT_INTERVAL).then(this.onDisconnect.bind(this, attempt + 1));
         });
     }
@@ -213,7 +213,7 @@ export default class TeamworkChat extends Person {
             switch(frame.name) {
                 case "room.message.created":
                     const message = frame.contents;
-                    debug("new message", message);
+                    logger.debug("new message", { message });
 
                     if(!message.roomId) {
                         throw new Error(
@@ -222,6 +222,7 @@ export default class TeamworkChat extends Person {
                         );
                     }
 
+                    // The reason we `getRoom` here rather than `findRoom` is because
                     return this.getRoom(message.roomId).then(room => {
                         return room.handleMessage(message);
                     });
@@ -238,7 +239,7 @@ export default class TeamworkChat extends Person {
                     if(person) {
                         return person.update({ [update.key]: update.value });
                     } else {
-                        debug(`Warning: user with ID ${update.userId} not loaded in memory, discarding frame.`);
+                        logger.debug(`Warning: user with ID ${update.userId} not loaded in memory, discarding frame.`, { update });
                     }
                 break;
 
@@ -246,7 +247,7 @@ export default class TeamworkChat extends Person {
                     // The act of getting the room from the API automatically saves the
                     // room to memory (or updates the existing room).
                     return this.getRoom(frame.contents.id, false).then(room => {
-                        debug(`${frame.contents.id} room has been updated`);
+                        logger.debug(`${frame.contents.id} room has been updated`);
                     });
                 break;
 
@@ -254,7 +255,7 @@ export default class TeamworkChat extends Person {
                 case "user.updated":
                     // As with `room.updated`, getting them from the API updates the user.
                     return this.getPerson(frame.contents.id, false).then(person => {
-                        debug(`${person.id} person has been updated`);
+                        logger.debug(`${person.id} person has been updated`, { person: person.toJSON() });
 
                         if(frame.name === "user.added") {
                             this.emit("person:created", person);
@@ -263,12 +264,14 @@ export default class TeamworkChat extends Person {
                 break;
 
                 case "unseen.counts.update":
-                    debug("'unseen.counts.update' frame received but discarded, we don't store this information. " +
-                        "Use `getUnseenCount` to get counts.");
+                    logger.debug(
+                        "'unseen.counts.update' frame received but discarded, we don't store this information. " +
+                        "Use `getUnseenCount` to get counts."
+                    );
                 break;
 
                 default:
-                    debug(`unknown frame "${frame.name}", ignoring.`, frame);
+                    logger.debug(`unknown frame "${frame.name}", ignoring.`, { frame: frame });
             }
         }).catch(error => {
             // Attach the frame to the error for debugging purposes
@@ -358,7 +361,7 @@ export default class TeamworkChat extends Person {
                 // of handles, it will either return the room ID containing all the users or create
                 // the room. We therefore leave it up to the `Room.sendMessage` to initialize itself
                 // and return the uninitialized room here.
-                debug(
+                logger.warn(
                     "Warning: Room object with more than one participant returned from `getRoomForHandles` is " +
                     "uninitialized. To initialize, send a message using `sendMessage`. This will create the room."
                 );
@@ -448,7 +451,7 @@ export default class TeamworkChat extends Person {
         // Emit the new room event
         this.emit("room:new", room);
 
-        debug("new room", room);
+        logger.debug("new room");
         this.rooms.push(room);
 
         return room;
@@ -656,7 +659,7 @@ export default class TeamworkChat extends Person {
         // function is so we don't have to duplicate this logic for each user property
         // we want to filter e.g. id, handle etc.
         if(!person) {
-            debug(
+            logger.warn(
                 `Warning: The Chat API does not currently support getting people directly by ${property}. ` +
                 "To ensure a user is returned, all people must be fetched first and then the " +
                 "users are filtered. This will run slower than expected."
@@ -729,7 +732,7 @@ export default class TeamworkChat extends Person {
      * @param {Person} person
      */
     addPerson(person) {
-        debug("new person", person);
+        logger.debug("new person");
 
         // Proxy any received messages to the `message:direct` event
         person.on("message:received", this.emit.bind(this, "message:direct", person));
@@ -831,7 +834,7 @@ export default class TeamworkChat extends Person {
             return;
         }
 
-        debug("closing TeamworkChat connection");
+        logger.info("closing TeamworkChat connection");
         this.forceClosed = true;
         this.api.close();
     }
@@ -909,7 +912,7 @@ export default class TeamworkChat extends Person {
      * @return {Promise<TeamworkChat>}        An authorized and fully connected TeamworkChat instance.
      */
     static fromCredentials(installation, username, password, socketServer) {
-        debug(`logging in with user ${username} to ${installation}.`);
+        logger.info(`logging in with user ${username} to ${installation}.`, { installation, username, socketServer });
         return APIClient.loginWithCredentials(installation, username, password, socketServer).then(api => {
             return new TeamworkChat(api, api.user);
         });

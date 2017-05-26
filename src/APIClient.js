@@ -2,7 +2,6 @@ import url from "url";
 import { inspect } from "util";
 import { EventEmitter } from "events";
 import qs from "qs";
-import createDebug from "debug";
 import WebSocket from "ws";
 import fetch from "node-fetch";
 import Promise, { CancellationError, TimeoutError } from "bluebird";
@@ -17,11 +16,12 @@ import {
     isUndefined,
     isPlainObject
 } from "lodash";
+import logging from "./lib/logging";
 import { indent } from "./util";
 import config from "../config.json";
 import pkg from "../package.json";
 
-const debug = createDebug("tw-chat:api");
+const logger = logging.add("tw-chat:api");
 
 /**
  * The time in ms between pings.
@@ -139,7 +139,6 @@ export default class APIClient extends EventEmitter {
         this.installation = installation;
         this.auth = auth;
         this.socketServer = socketServer;
-        this.debug = createDebug("tw-chat:api");
     }
 
     /**
@@ -155,7 +154,7 @@ export default class APIClient extends EventEmitter {
             }
 
             if(!DEBUG_FILTERED_FRAMES.includes(frame.name)) {
-                this.debug("sending message \n" + indent(JSON.stringify(frame, null, 2)) + "\n");
+                this.logger.info("sending message", { frame });
             }
 
             frame = typeof frame === "object" ? JSON.stringify(frame) : frame;
@@ -207,14 +206,14 @@ export default class APIClient extends EventEmitter {
 
         return new Promise((resolve) => {
             const handler = frame => {
-                debug("frame received")
+                this.logger.info("frame received")
                 if(bufferedFrames.length < count) {
                     bufferedFrames.push(frame);
 
-                    debug(`buffering frame for await, ${count - bufferedFrames.length} left`);
+                    this.logger.info(`buffering frame for await, ${count - bufferedFrames.length} left`);
 
                     if(bufferedFrames.length >= count) {
-                        debug("buffered frame count")
+                        this.logger.info("buffered frame count")
                         this.removeListener("frame", handler);
 
                         return resolve(bufferedFrames);
@@ -258,14 +257,14 @@ export default class APIClient extends EventEmitter {
      */
     socketRequest(type, frame, timeout) {
         if(!DEBUG_FILTERED_FRAMES.includes(type)) {
-            this.debug(`socket request: ${type} (timeout = ${timeout})`, JSON.stringify(frame))
+            this.logger.debug(`socket request: ${type} (timeout = ${timeout})`, { frame });
         }
 
         return this.sendFrame(type, frame).then(packet => {
             return this.awaitFrame({ nonce: packet.nonce }, timeout);
         }).tap(packet => {
             if(!DEBUG_FILTERED_FRAMES.includes(packet.name)) {
-                this.debug("socket response:", JSON.stringify(packet));
+                this.logger.debug("socket response:", { frame: packet });
             }
         });
     }
@@ -276,7 +275,7 @@ export default class APIClient extends EventEmitter {
      * @param  {Error} error
      */
     onSocketError(error) {
-        this.debug("socket error", error);
+        this.logger.error("socket error", { error });
         this.emit("error", error);
     }
 
@@ -290,7 +289,7 @@ export default class APIClient extends EventEmitter {
             const frame = JSON.parse(message);
 
             if(!DEBUG_FILTERED_FRAMES.includes(frame.name)) {
-                this.debug("incoming frame\n" + indent(JSON.stringify(frame, null, 2)) + "\n");
+                this.logger.debug("incoming frame", { frame });
             }
 
             if(this.awaiting.length) {
@@ -304,7 +303,7 @@ export default class APIClient extends EventEmitter {
             this.emit("message", message);
             this.emit("frame", frame);
         } catch(err) {
-            this.debug("bad frame", err, inspect(message));
+            this.logger.error("bad frame", { err, message: message.toString() });
             this.emit("error", Object.assign(new Error(`Error parsing frame`), { message }));
         }
     }
@@ -313,7 +312,7 @@ export default class APIClient extends EventEmitter {
      * Event Handler: when the client's websocket emits "close"
      */
     onSocketClose(reason, code = "none", message = "none") {
-        this.debug("socket closed");
+        this.logger.info("socket closed");
         this.stopPing();
 
         // Reject any awaiting frames
@@ -335,9 +334,9 @@ export default class APIClient extends EventEmitter {
      * @return {Promise} Resolves when authentication is completed successfully.
      */
     authenticate(user) {
-        this.debug("authenticating with chat-server, awaiting authentication.request challenge");
+        this.logger.info("authenticating with chat-server, awaiting authentication.request challenge");
         return this.awaitFrame("authentication.request").then(() => {
-            this.debug("challenge recieved, responding with auth");
+            this.logger.info("challenge recieved, responding with auth");
             return this.sendFrame("authentication.response", {
                 authKey: user.authkey,
                 userId: parseInt(user.id),
@@ -346,16 +345,16 @@ export default class APIClient extends EventEmitter {
                 clientVersion: pkg.version
             });
         }).then(() => {
-            this.debug("awaiting response with success or failure")
+            this.logger.info("awaiting response with success or failure")
             // Race the error or confirmation frames.
             return this.raceFrames("authentication.error", "authentication.confirmation");
         }).then(frame => {
             if(frame.name === "authentication.error") {
-                this.debug("authentication failed");
+                this.logger.info("authentication failed");
                 throw new Error(frame.contents);
             }
 
-            this.debug("successfully authenticated");
+            this.logger.info("successfully authenticated");
 
             // Start the pinging
             this.startPing();
@@ -406,10 +405,18 @@ export default class APIClient extends EventEmitter {
                 id: parseInt(res.account.id)
             });
 
+            this.logger = logging.add(`tw-chat:api:@${this.user.handle}`, {
+                meta: {
+                    auth: this.auth,
+                    installation: this.installation,
+                    handle: this.user.handle
+                }
+            });
+
             const socketServer = this.getSocketServer();
 
             return new Promise((resolve, reject) => {
-                this.debug(`connecting socket server to ${socketServer}`);
+                this.logger.info(`connecting socket server to ${socketServer}`);
                 this.socket = new APIClient.WebSocket(socketServer, {
                     headers: {
                         Cookie: `tw-auth=${this.auth}`
@@ -430,9 +437,6 @@ export default class APIClient extends EventEmitter {
                     // Remove the "error" handler and replace it with the `onSocketError`.
                     this.socket.on("error", this.onSocketError.bind(this));
                     this.socket.on("close", this.onSocketClose.bind(this, "Socket was closed by the WebSocket client (usually server related)"));
-
-                    // Update the debug to differentiate between users
-                    this.debug.namespace = "tw-chat:api:@" + this.user.handle;
 
                     // Resolve when the socket opens
                     resolve(this.socket);
@@ -496,10 +500,10 @@ export default class APIClient extends EventEmitter {
             // having a pending ping left.
             this.ping().delay(PING_INTERVAL).then(resolve).catch(TimeoutError, err => {
                 if(attempt < PING_MAX_ATTEMPT) {
-                    this.debug(`ping timed out, attempting again (attempt = ${attempt})`);
+                    this.logger.debug(`ping timed out, attempting again (attempt = ${attempt})`);
                     this.nextPing(attempt + 1);
                 } else {
-                    this.debug(`third ping attempt failed, assuming socket connection is broken. Closing.`);
+                    this.logger.debug(`third ping attempt failed, assuming socket connection is broken. Closing.`);
                     reject(err);
                 }
 
@@ -507,14 +511,14 @@ export default class APIClient extends EventEmitter {
                 return null;
             }).catch(err => this.emit.bind(this, "error"));
         }).then(() => {
-            this.debug("ping pong");
+            this.logger.debug("ping pong");
             this.nextPing();
 
             return null; // Again, silencing the errors like above
         }).catch(CancellationError, () => {
-            this.debug("pinging stopped");
+            this.logger.debug("pinging stopped");
         }).catch(TimeoutError, () => {
-            this.debug("pinging stopped, connection broken");
+            this.logger.debug("pinging stopped, connection broken");
             this.close();
         });
     }
@@ -526,7 +530,7 @@ export default class APIClient extends EventEmitter {
         this.pinging = false;
 
         if(this._nextPingReject) {
-            this.debug("stopping ping");
+            this.logger.info("stopping ping");
             this._nextPingReject(new CancellationError());
             delete this._nextPingReject;
         }
@@ -544,7 +548,7 @@ export default class APIClient extends EventEmitter {
         // It still closes gracefully but we don't care when it does.
         this.socket.removeAllListeners("close");
 
-        this.debug("forcefully closing socket");
+        this.logger.info("forcefully closing socket");
         this.socket.close();
 
         this.onSocketClose("The user force closed the socket");
@@ -740,9 +744,9 @@ export default class APIClient extends EventEmitter {
             target += "?" + qs.stringify(omitBy(options.query, isUndefined));
         }
 
-        debug(">>", green(options.method || "GET"), blue(target), options);
+        logger.debug(`>> ${options.method || "GET"} ${target}`, { target, options });
         return Promise.try(fetch.bind(null, target, options)).then(res => {
-            debug(res.status, res.statusText);
+            logger.debug(res.status, res.statusText, { target, options });
             if(options.raw) return res;
             else {
                 if(!res.ok) {
@@ -759,7 +763,7 @@ export default class APIClient extends EventEmitter {
             }
         }).tap(data => {
             if(!options.raw) {
-                debug("<<", blue(target), JSON.stringify(data, null, 2));
+                logger.debug(`<< ${target}`, { target, options });
             }
         });
     }
@@ -1223,10 +1227,10 @@ export default class APIClient extends EventEmitter {
                 // Extract the tw-auth cookie from the responses
                 const twAuth = extractTWAuthCookie(res.headers.get("Set-Cookie"));
 
-                debug(`Successfully logged in: tw-auth=${twAuth}`);
+                logger.info(`Successfully logged in: tw-auth=${twAuth}`);
                 return twAuth;
             } else {
-                debug(`login failed: ${res.status}`);
+                logger.info(`login failed: ${res.status}`);
                 throw new Error(`Invalid login for ${username}@${installation}: ${res.status} ${res.statusText}`);
             }
         })
@@ -1245,7 +1249,7 @@ export default class APIClient extends EventEmitter {
     static loginWithCredentials(installation, username, password, socketServer) {
         installation = APIClient.normalizeInstallation(installation);
 
-        debug(`attempting to login with ${username} to ${installation}.`);
+        logger.info(`attempting to login with ${username} to ${installation}.`);
         return APIClient.login(installation, username, password).then(auth => {
             return (new APIClient(installation, auth, socketServer)).connect();
         });
@@ -1263,7 +1267,7 @@ export default class APIClient extends EventEmitter {
     static loginWithAuth(installation, auth, socketServer) {
         installation = APIClient.normalizeInstallation(installation);
 
-        debug(`attempting to login with auth key "${auth}" to ${installation}`);
+        logger.info(`attempting to login with auth key "${auth}" to ${installation}`);
         const api = new APIClient(installation, auth, socketServer);
 
         return api.connect();

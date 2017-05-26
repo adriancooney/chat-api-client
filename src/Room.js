@@ -1,12 +1,9 @@
 import { inspect } from "util";
 import Promise from "bluebird";
 import moment from "moment";
-import createDebug from "debug";
 import { values, size, omit, last, without } from "lodash";
 import EventEmitter from "./lib/EventEmitter";
 import Message from "./Message";
-
-const debug = createDebug("tw-chat:room");
 
 const MAX_MESSAGE_RETENTION = 50;
 

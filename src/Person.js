@@ -1,12 +1,9 @@
 import { inspect } from "util";
 import Promise from "bluebird";
 import moment from "moment";
-import createDebug from "debug";
 import { omit } from "lodash";
 import EventEmitter from "./lib/EventEmitter";
 import Room from "./Room";
-
-const debug = createDebug("tw-chat:person");
 
 /**
  * Person model.
