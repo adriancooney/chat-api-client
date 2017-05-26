@@ -128,6 +128,7 @@ export default class TeamworkChat extends Person {
 
     /**
      * Create a new TeamworkChat instance.
+     *
      * @param  {APIClient}  api  An authorized APIClient instance.
      * @param  {Object}     user User data to pass to Person#constructor.
      * @return {TeamworkChat}
@@ -237,7 +238,6 @@ export default class TeamworkChat extends Person {
                     if(person) {
                         return person.update({ [update.key]: update.value });
                     } else {
-                        // TODO: Why do we discard here and `getPerson` in `user.update` event?
                         debug(`Warning: user with ID ${update.userId} not loaded in memory, discarding frame.`);
                     }
                 break;
@@ -350,7 +350,7 @@ export default class TeamworkChat extends Person {
 
             return this.getPersonByHandle(without(handles, this.handle)[0]).then(person => person.room);
         } else {
-            let room = this.findRoomForHandles(handles);
+            const room = this.findRoomForHandles(handles);
 
             if(!room) {
                 // Workaround: The Chat API doesn't directly have an API to get a room by user's
@@ -548,7 +548,7 @@ export default class TeamworkChat extends Person {
     }
 
     /**
-     * Get a room by it's title.
+     * Get a room by it's title. WARNING: This method has to load
      *
      * @param  {String|RegExp} title The exact room title or a regex.
      * @return {Room}                The room, if any.
@@ -560,7 +560,7 @@ export default class TeamworkChat extends Person {
             return Promise.resolve(room);
         }
 
-        return this.getAllRooms().then(() => {
+        return this.getRooms({ search: title }).then(() => {
             return this.findRoomByTitle(title);
         });
     }
@@ -648,7 +648,7 @@ export default class TeamworkChat extends Person {
      * @return {Promise<Person>} The found person object.
      */
     getPersonBy(property, value) {
-        let person = values(this.room.people).find(person => person[property] === value);
+        const person = values(this.room.people).find(person => person[property] === value);
 
         // If we don't have a person, try load it from the API. Unfortunately, the API
         // doesn't seem to have an endpoint to get a user by API by handle so we get
@@ -701,6 +701,7 @@ export default class TeamworkChat extends Person {
      * @return {Promise<Person[]>}
      */
     getAllPeople(filter) {
+        // The default parameters for a call to `getPeople` returns all people. (Chat API defaults)
         return this.getPeople(filter);
     }
 
@@ -768,55 +769,17 @@ export default class TeamworkChat extends Person {
      * @return {Promise<Message[]>}     The retrieved messages.
      */
     getAllMessages(filter) {
+        // Get the first page to get the pagination details
         return this.getMessages(filter).then(messages => {
+            if(messages.pages <= 1) {
+                return messages;
+            }
+
+            // Get the remaining pages
             return Promise.mapSeries(range(2, messages.pages + 1), page => this.getMessages(filter, page)).then(pages => {
                 return flatten([messages].concat(pages));
             });
         });
-    }
-
-    /**
-     * Impersonate a person and return an authenticated TeamworkChat instance. This means you
-     * are logged in as that person. For testing purposes only.
-     *
-     * Remember: these are SEPERATE instances so they all managed rooms and rooms in
-     * memory themselves and do not communicate with each other! This means different
-     * TeamworkChat instances DO NOT INTEROPERATE.
-     *
-     * Careful: Users may not be participating in the same rooms so they may not
-     * be able to send messages to certain rooms! 404's will be returned.
-     *
-     * @param  {Person}             person The person to impersonate.
-     * @return {Promise<TeamworkChat>}     The impersonated person.
-     */
-    impersonate(person) {
-        if(person === this)
-            return Promise.resolve(this);
-
-        return this.api.impersonate(person.id).then(auth => {
-            return TeamworkChat.fromAuth(this.api.installation, auth);
-        });
-    }
-
-    /**
-     * Impersonate a person by their handle.
-     *
-     * @param  {String}                 handle The user's handle.
-     * @return {Promise<TeamworkChat>}         The impersonated person.
-     */
-    impersonateByHandle(handle) {
-        return this.getPersonByHandle(handle).then(person => {
-            return this.impersonate(person);
-        });
-    }
-
-    /**
-     * Revert the impersonation.
-     *
-     * @return {Promise} Resolves when impersonation revert request completes.
-     */
-    unimpersonate() {
-        return this.api.unimpersonate();
     }
 
     /**
@@ -849,7 +812,7 @@ export default class TeamworkChat extends Person {
     }
 
     /**
-     * Logout the from the API and close the connection.
+     * Logout from the API and close the connection.
      *
      * @return {Promise} Resolves once logged out.
      */
@@ -864,8 +827,9 @@ export default class TeamworkChat extends Person {
      */
     close() {
         // Don't attempt to close the socket a second time
-        if(this.forceClosed)
+        if(this.forceClosed) {
             return;
+        }
 
         debug("closing TeamworkChat connection");
         this.forceClosed = true;
@@ -1048,6 +1012,17 @@ export default class TeamworkChat extends Person {
         }), callback);
     }
 
+    /**
+     * Login with an object that contains a combination of the following properties. It's essentially
+     * a shortcut object for the `from*` methods.
+     *
+     *  * "installation", "key" - The installation and user's API key.
+     *  * "installation", "username", "password" - The installation and user's username and password.
+     *  * "installation", "token" - The installation and user's API token.
+     *
+     * @param  {Object} details Object containing the above keys.
+     * @return {Promise<TeamworkChat>}  Resolves to an TeamworkChat instance.
+     */
     static from(details) {
         return APIClient.from(details).then(api => {
             return new TeamworkChat(api, api.user);

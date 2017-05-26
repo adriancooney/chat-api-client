@@ -133,20 +133,26 @@ export default class Person extends EventEmitter {
      * @return {Person}         The current person instance.
      */
     update(details) {
-        let merged = {};
+        const overrides = {};
 
-        if(details.id) merged.id = parseInt(details.id);
-        if(details.lastActivityAt) merged.lastActivity = moment(details.lastActivityAt);
+        if(details.id) {
+            overrides.id = parseInt(details.id);
+        }
 
-        merged = Object.assign(omit(details, [
+        if(details.lastActivityAt) {
+            overrides.lastActivity = moment(details.lastActivityAt);
+        }
+
+        const merged = Object.assign(omit(details, [
             "lastActivityAt",
             "roomId"
-        ]), merged);
+        ]), overrides);
 
-        let person = Object.assign(this, merged);
+        const person = Object.assign(this, merged);
         this.emit("updated", person, merged);
 
-        // If we have a roomId, add it to the pair room
+        // If we have a roomId returned from the API (i.e. the user's conversation with the logged
+        // in user), add it to the pair room to initilize it.
         if(details.roomId) {
             this.room.update({ id: details.roomId });
         }

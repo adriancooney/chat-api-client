@@ -104,16 +104,15 @@ export default class Room extends EventEmitter {
      * @return {Room}           The updated room object.
      */
     update(details) {
-        const timestamps = ["lastActivityAt", "lastViewedAt", "updatedAt", "createdAt"];
-
-        // Convert timestamps to moments
-        Object.assign(this, omit(details, "people", ...timestamps), timestamps.reduce((up, ts) => {
+        const timestamps = ["lastActivityAt", "lastViewedAt", "updatedAt", "createdAt"].reduce((up, ts) => {
             if(details[ts]) {
                 up[ts] = moment(details[ts]);
             }
 
             return up;
-        }, {}));
+        }, {});
+
+        Object.assign(this, omit(details, "people"), timestamps);
 
         this.emit("updated", details);
 
@@ -226,6 +225,7 @@ export default class Room extends EventEmitter {
      * @return {Message}          The newly added message.
      */
     addMessage(message) {
+        // Only hold the last MAX_MESSAGE_RETENTION message
         if(this.messages.length >= MAX_MESSAGE_RETENTION) {
             this.messages.shift();
         }

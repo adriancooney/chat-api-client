@@ -1064,11 +1064,13 @@ export default class APIClient extends EventEmitter {
      * @param  {String}  filter.sort                Sort results, values: "lastActivityAt"
      * @param  {String}  filter.status              Filter by status, values: "all"
      * @param  {String}  filter.since               Return conversations that have activity after timestamp.
+     * @param  {String}  filter.search              Search rooms by title.
      * @param  {Number}  offset                     The conversation cursor offset.
      * @param  {Number}  limit                      The number of conversations after the cursor to get.
      * @return {Promise<Array>}                     The list of conversations. See Teamwork API Docs.
      */
     getRooms(filter, offset = 0, limit = 10) {
+        // Merge with defaults
         filter = {
             includeMessages: true,
             includeUsers: true,
@@ -1076,19 +1078,27 @@ export default class APIClient extends EventEmitter {
             ...filter
         };
 
+        // Map to the query object
         const query = {
+            filter: {},
             includeUserData: filter.includeUsers,
             includeMessageData: filter.includeMessages,
-            sort: "lastActivityAt"
+            sort: filter.sort
         };
 
-        if(filter.status || filter.since) {
-            query.filter = {};
-            if(filter.status) query.filter.status = filter.status;
-            if(filter.since) query.filter.activityAfter = filter.since;
+        if(filter.status) {
+            query.filter.status = filter.status;
         }
 
-        return this.requestList(`/chat/v2/conversations.json`, {
+        if(filter.since) {
+            query.filter.activityAfter = filter.since;
+        }
+
+        if(filter.search) {
+            query.filter.searchTerm = filter.search;
+        }
+
+        return this.requestList(`/chat/v3/conversations.json`, {
             offset, limit, query
         });
     }
