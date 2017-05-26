@@ -1272,6 +1272,17 @@ export default class APIClient extends EventEmitter {
         return APIClient.loginWithCredentials(installation, key, "club-lemon", socketServer);
     }
 
+    /**
+     * Login with an object that contains a combination of the following properties. It's essentially
+     * a shortcut object for the `loginWith*` methods.
+     *
+     *  * "installation", "key" - The installation and user's API key.
+     *  * "installation", "username", "password" - The installation and user's username and password.
+     *  * "installation", "token" - The installation and user's API token.
+     *
+     * @param  {Object} details Object containing the above keys.
+     * @return {Promise<APIClient>}  Resolves to an authenticated APIClient instance.
+     */
     static from(details = {}) {
         if(!details.installation)
             throw new Error("Installation must be provided.");
@@ -1317,13 +1328,13 @@ export default class APIClient extends EventEmitter {
      *     Chat socket frames. The filter objects can contain various properties
      *     that dictate how we match that frame. The follow properties are supported:
      *
-     *          "type"      {String}    Match the exact frame type. Exception: "*", matches
+     *          "type"      {String}    Match the exact frame type.
      *          "type"      {RegExp}    Match the frame name by regex.
      *          "nonce"     {Number}    Match the exact nonce of the frame.
      *          "contents"  {Object}    Match if "contents" is a subset of the frame's "contents".
      *
-     *     Fitlers can also be specified in shorthand:
-     *      - If the filter is a string, it is converted to a `{ type: <filter> }` object.
+     *     Filters can also be specified in shorthand:
+     *      - If the filter is a string e.g. `matchFrame("user.added")`, it is converted to a `{ type: <filter> }` object.
      *      - "*" matches all frames.
      *
      * @param  {Object|String}  fitlers     See "Filters" section above.

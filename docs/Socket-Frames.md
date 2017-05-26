@@ -24,6 +24,31 @@ Fired when a message is created.
 }
 ```
 
+### `room.message.created` (with file)
+
+```json
+{
+    "contentType": "object",
+    "name": "room.message.created",
+    "contents": {
+        "roomId": 183702,
+        "body": "",
+        "file": {
+            "name": "spotify.js",
+            "key": "cff751ae-69bf-450f-8952-5b17f70780e7.spotify.js",
+            "contentType": "text/javascript"
+        }
+    },
+    "source": {
+        "name": "Teamwork Chat",
+        "version": "0.25.4-rc2"
+    },
+    "nonce": 9,
+    "uid": null,
+    "nodeId": null
+}
+```
+
 ### `user.modified` (received)
 Update a user's value.
 
