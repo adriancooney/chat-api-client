@@ -6,7 +6,7 @@ import { indent } from "../util";
 const HIDDEN_META_PROPS = ["auth", "installation", "handle"];
 
 // Set the default level to info unless DEBUG set
-const level = winston.level = process.env.DEBUG_LEVEL || "info";
+const level = winston.level = process.env.DEBUG_LEVEL || "debug";
 
 const colors = ["yellow", "green", "magenta", "cyan", "blue", "red", "grey", "cyan"];
 

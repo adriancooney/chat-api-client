@@ -241,7 +241,7 @@ export default class Room extends EventEmitter {
         if(!this.initialized)
             return Promise.reject(new Error("Unable to get messages for uninitialized room."));
 
-        return this.api.getMessages(this.id).then(({ messages }) => {
+        return this.api.getMessages(this.id).then(messages => {
             return messages.map(message => this.saveMessage(message));
         });
     }

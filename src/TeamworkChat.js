@@ -177,27 +177,24 @@ export default class TeamworkChat extends Person {
             logger.info(`socket reconnection process failed, attempting to reconnect (attempt ${attempt})`, { attempt });
         }
 
-        return this.connect()
-        // .then(() => {
-        //     logger.info("socket reconnected to server");
-        //     this.monitor.reconnects++;
+        return this.connect().then(() => {
+            logger.info("socket reconnected to server");
+            this.monitor.reconnects++;
 
-        //     logger.info("getting updates");
-        //     return this.getUpdates(this.monitor.lastDisconnectTimestamp);
-        // })
-        // .spread((people, rooms, messages) => {
-        //     // Calculate the length of time we we're disconnected
-        //     const outage = moment.duration(moment().diff(this.monitor.lastDisconnectTimestamp));
+            logger.info("getting updates");
+            return this.getUpdates(this.monitor.lastDisconnectTimestamp);
+        }).spread((people, rooms, messages) => {
+            // Calculate the length of time we we're disconnected
+            const outage = moment.duration(moment().diff(this.monitor.lastDisconnectTimestamp));
 
-        //     // Update the downtime
-        //     this.monitor.downtime.add(outage);
+            // Update the downtime
+            this.monitor.downtime.add(outage);
 
-        //     // Note: it's okay if this call fails, we will re-attempt it in the catch. Don't
-        //     // worry, it won't attempt to reconnect to the websocket again.
-        //     this.emit("reconnect", people, rooms, messages, outage);
-        // })
-        .catch(error => {
-            logger.error("unable to reconnect socket and get updates", { error });
+            // Note: it's okay if this call fails, we will re-attempt it in the catch. Don't
+            // worry, it won't attempt to reconnect to the websocket again.
+            this.emit("reconnect", people, rooms, messages, outage);
+        }).catch(error => {
+            logger.error(`unable to reconnect socket and get updates: ${error.message}`);
             return Promise.delay(RECONNECT_INTERVAL).then(this.onDisconnect.bind(this, attempt + 1));
         });
     }
@@ -276,9 +273,7 @@ export default class TeamworkChat extends Person {
         }).catch(error => {
             // Attach the frame to the error for debugging purposes
             error.frame = frame;
-
-            console.error(error);
-
+            winston.error(`${error.message}`, { error });
             this.emit("error", error);
         });
     }
@@ -563,6 +558,7 @@ export default class TeamworkChat extends Person {
             return Promise.resolve(room);
         }
 
+        // TODO: Use API directly, don't bother adding the results to memory
         return this.getRooms({ search: title }).then(() => {
             return this.findRoomByTitle(title);
         });
@@ -578,21 +574,17 @@ export default class TeamworkChat extends Person {
      *                           offset, limit, total which are returned from the API.
      */
     getRooms(filter, offset, limit) {
-        return this.api.getRooms(filter, offset, limit).then(res => {
+        return this.api.getRooms(filter, offset, limit).then(rooms => {
             // First, we need to create the people. This creates the direct conversation
             // rooms with the current user which we will attempt to match later if we
             // come across later when a conversation contains on the current user and
             // another person.
-            const people = uniqBy(flatten(res.conversations.map(({ people }) => people)), "id").map(this.savePerson.bind(this));
+            uniqBy(flatten(rooms.map(({ people }) => people)), "id").forEach(this.savePerson.bind(this));
 
             // Next, we loop over all the conversations. If we come across a pair room containing
             // the current user (i.e. this.api), then we don't bother creating another room and just
             // update that direct room (attaches as Person.room).
-            const conversations = res.conversations.map(this.saveRoom.bind(this));
-
-            // Assign the return page details (limit, offset, total) to the returned array to
-            // describe what results are returned.
-            return Object.assign(conversations, res.meta.page);
+            return rooms.map(this.saveRoom.bind(this));
         });
     }
 
@@ -695,7 +687,7 @@ export default class TeamworkChat extends Person {
      * @return {Promise<Person[]>}  The returned people list.
      */
     getPeople(filter, offset, limit) {
-        return this.api.getPeople(filter, offset, limit).then(({ people }) => people.map(this.savePerson.bind(this)));
+        return this.api.getPeople(filter, offset, limit).then(people => people.map(this.savePerson.bind(this)));
     }
 
     /**
@@ -792,15 +784,47 @@ export default class TeamworkChat extends Person {
      * @return {Promise<[]>}   Resolves to an array of [people, rooms, messages].
      */
     getUpdates(since) {
-        // We should also hit `companies.json` after we reconnect for updates
-        // on the companies however we don't use the data returned so we don't bother.
-        const filter = { since };
+        since = since.toISOString();
 
-        return Promise.all([
-            this.getPeople(filter),
-            this.getRooms(filter),
-            this.getAllMessages(filter)
-        ]);
+        // Update the people. This is different from a simple `getPeople` because we only
+        // update people we have in memory. It's the ONLY time we get people via the API
+        // over `getPeople`.
+        const peopleUpdate = this.api.getPeople({ since }).then(people => {
+            return people.map(person => {
+                const existingPerson = this.findPersonById(person.id);
+
+                if(!existingPerson) {
+                    return null;
+                }
+
+                return existingPerson.update(person);
+            }).filter(a => a);
+        });
+
+        // It's the same for rooms, only update those in memory
+        const roomsUpdate = this.api.getRooms({ since }).then(rooms => {
+            return rooms.map(room => {
+                const existingRoom = this.findRoomById(room.id);
+
+                if(!existingRoom) {
+                    return null;
+                }
+
+                return existingRoom.update(room);
+            }).filter(a => a);
+        });
+
+        const messagesUpdate = this.api.getAllUserMessages({ since }).then(messages => {
+            return messages.map(message => {
+                const room = this.findRoomById(message.roomId);
+
+                if(room) {
+                    return room.handleMessage(message);
+                }
+            });
+        });
+
+        return Promise.all([ peopleUpdate, roomsUpdate, messagesUpdate ]);
     }
 
     /**

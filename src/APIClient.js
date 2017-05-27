@@ -763,7 +763,7 @@ export default class APIClient extends EventEmitter {
             }
         }).tap(data => {
             if(!options.raw) {
-                logger.debug(`<< ${target}`, { target, options });
+                logger.debug(`<< ${target}`, { target, options, data });
             }
         });
     }
@@ -833,26 +833,24 @@ export default class APIClient extends EventEmitter {
      * @param  {String} filter.since  Timestamp to only return values updated since timestamp.
      * @param  {Number} offset        The cursor offset on the list of people.
      * @param  {Number} limit         The amount of people to return after the cursor offset.
-     * @return {Promise<Object>}      The list of people.
+     * @return {Promise<Array>}       The list of people.
      */
     getPeople(filter = {}, offset, limit) {
         let query = [];
 
         if(filter.since) {
-            query.push({
-                updatedAfter: filter.since
-            })
+            query.push({ filter: { updatedAfter: filter.since } });
         }
 
         if(filter.search) {
-            query.filter = {
-                searchTerm: filter.search
-            };
+            query.push({ filter: { searchTerm: filter.search } });
         }
 
         query = merge(...query);
 
-        return this.requestList("/chat/v3/people.json", { offset, limit, query });
+        return this.requestList("/chat/v3/people.json", { offset, limit, query }).then(({ people }) => {
+            return people || [];
+        });
     }
 
     /**
@@ -1071,11 +1069,11 @@ export default class APIClient extends EventEmitter {
      * @param  {String}  filter.search              Search rooms by title.
      * @param  {Number}  offset                     The conversation cursor offset.
      * @param  {Number}  limit                      The number of conversations after the cursor to get.
-     * @return {Promise<Array>}                     The list of conversations. See Teamwork API Docs.
+     * @return {Promise<Array>}                     The list of conversations.
      */
     getRooms(filter, offset = 0, limit = 10) {
         // Merge with defaults
-        filter = {
+        const options = {
             includeMessages: true,
             includeUsers: true,
             sort: "lastActivityAt",
@@ -1085,30 +1083,32 @@ export default class APIClient extends EventEmitter {
         // Map to the query object
         const query = {
             filter: {},
-            includeUserData: filter.includeUsers,
-            includeMessageData: filter.includeMessages,
-            sort: filter.sort
+            includeUserData: options.includeUsers,
+            includeMessageData: options.includeMessages,
+            sort: options.sort
         };
 
-        if(filter.status) {
-            query.filter.status = filter.status;
+        if(options.status) {
+            query.filter.status = options.status;
         }
 
-        if(filter.since) {
-            query.filter.activityAfter = filter.since;
+        if(options.since) {
+            query.filter.activityAfter = options.since;
         }
 
-        if(filter.search) {
-            query.filter.searchTerm = filter.search;
+        if(options.search) {
+            query.filter.searchTerm = options.search;
         }
 
-        return this.requestList(`/chat/v3/conversations.json`, {
+        return this.requestList(`/chat/v2/conversations.json`, {
             offset, limit, query
+        }).then(({ conversations, meta }) => {
+            return Object.assign(conversations || [], meta.page);
         });
     }
 
     /**
-     * Get a logged in user's messages (without room).
+     * GET /chat/v2/messages.json - Get a logged in user's messages (without room).
      *
      * Note: Unfortunately, this doesn't follow the other pagination schema so you're
      * on your own with regards to iterating the pages and the like.
@@ -1121,28 +1121,58 @@ export default class APIClient extends EventEmitter {
      * @param  {Number} pageSize        The amount of messages to return per page.
      * @return {Promise<Object>}        The messages from the API.
      */
-    getUserMessages({ since }, page = 1, pageSize = 50) {
-        return this.request("/chat/v2/messages.json", {
-            query: {
-                createdAfter: since,
-                page, pageSize
+    getUserMessages(filter = {}, page = 1, pageSize = 50) {
+        const query = {
+            page, pageSize
+        };
+
+        if(filter.since) {
+            query.createdAfter = filter.since;
+        }
+
+        return this.request("/chat/v2/messages.json", { query }).then(({ messages, pageInfo }) => Object.assign(messages, {
+            page: pageInfo ? pageInfo.page : 1,
+            pages: pageInfo ? pageInfo.pages : 1
+        }));
+    }
+
+    /**
+     * GET /chat/v2/messages.json - Get a logged in user's messages (without room).
+     *
+     * @param  {Object} filter          Object containing filters.
+     * @param  {String} filter.since    Timestamp to get message from now until `since`.
+     * @param  {Number} pageSize        The amount of messages to return per page.
+     * @return {Promise<Array>}         The messages returned from the API.
+     */
+    getAllUserMessages(filter, pageSize) {
+        return this.getUserMessages(filter, 1, pageSize).then(messages => {
+            if(messages.pages <= 1) {
+                return messages;
             }
+
+            return Promise.mapSeries(Array(messages.pages - 1).fill(0), (n, i) => {
+                return this.getUserMessages(filter, i + 2, pageSize);
+            }).then(allMessages => {
+                return messages.concat(flatten(allMessages));
+            });
         });
     }
 
     /**
      * GET /chat/v2/rooms/<room>/messages.json - Get messages for a room.
      *
-     * @param  {Number} room    The room ID.
-     * @param  {Object} options          Options to configure the results return.
-     * @param  {Object} options.page     Configure which page to return.
-     * @param  {Object} options.pageSize Configure how many values are returned.
-     * @return {Object}         The messages return from the API.
+     * @param  {Number} room            The room ID.
+     * @param  {Object} filter          Options to configure the results return.
+     * @param  {Object} filter.page     Configure which page to return.
+     * @param  {Object} filter.pageSize Configure how many values are returned.
+     * @return {Promise<Array>}         The messages returned from the API.
      */
     getMessages(room, filter) {
         const query = Object.assign({}, filter);
 
-        return this.request(`/chat/v2/rooms/${room}/messages.json`, { query });
+        return this.request(`/chat/v2/rooms/${room}/messages.json`, { query }).then(({ messages, pageInfo }) => {
+            return Object.assign(messages, { page: pageInfo });
+        });
     }
 
     /**
